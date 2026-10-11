@@ -1,0 +1,12 @@
+# Qdrant standalone 配置（knowledge-hub）
+log_level: INFO
+storage:
+  storage_path: qdrant_data/storage
+  snapshots_path: qdrant_data/snapshots
+  on_disk_payload: true
+service:
+  http_port: 6333
+  grpc_port: 6334
+  host: 127.0.0.1
+  enable_tls: false
+telemetry_disabled: true

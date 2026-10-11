@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.vite/
+*.local
+tsconfig.tsbuildinfo
+
+# 截图产物（`node scripts/screenshot.mjs` 的输出，用于人工目测，不进仓库）
+.shots/

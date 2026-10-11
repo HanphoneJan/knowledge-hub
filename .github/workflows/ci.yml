@@ -1,0 +1,59 @@
+# CI = 不需要外部服务与模型的**门禁**（契约 + 免基础设施单测 + 前端构建与单测）。
+#
+# ## 为什么不是"跑全部 1251 项"
+#
+# 全量 `pytest` 需要真实 Postgres(pgvector)、Qdrant，以及本地缓存好的模型
+# （`bge-small` ~100MB；视觉腿还要 colSmol 2.65GB），而本项目有一条硬约束是
+# **模型一律离线加载**（`HF_HUB_OFFLINE=1`）。把这些塞进托管 CI，要么每次下载几百 MB，
+# 要么让视觉腿静默 `skipped` —— 那是**假绿灯**。所以这里只跑真正与基础设施无关的那部分，
+# 全量基线留在本机（`MEMORY.md` §0/§3）。判定清单与本地命令**同一份**：`deploy/ci.sh`。
+#
+# ⚠️ 改动"哪些测试进 CI"时，先在本地把 `DATABASE_URL` 指向一个不存在的库跑一遍
+#（`deploy/ci.sh` 头部写了这个做法），否则会红在一个本机跑得好好的用例上。
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: web（typecheck · vitest · build）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: 安装依赖
+        working-directory: web
+        run: npm ci
+      - name: 门禁（同 `bash deploy/ci.sh web`）
+        run: bash deploy/ci.sh web
+
+  py:
+    name: py（契约 + 免基础设施单测）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: 安装依赖
+        run: uv sync --frozen
+      - name: 门禁（同 `bash deploy/ci.sh py`）
+        run: bash deploy/ci.sh py
+        env:
+          # 这两条只是让 import 期的配置有值；本 job 的测试**不连库**（见 deploy/ci.sh）
+          PKH_DATABASE_URL: postgresql+asyncpg://ci:ci@127.0.0.1:5432/ci
+          DATABASE_URL: postgresql+asyncpg://ci:ci@127.0.0.1:5432/ci
+          HF_HUB_OFFLINE: "1"
+          TRANSFORMERS_OFFLINE: "1"
