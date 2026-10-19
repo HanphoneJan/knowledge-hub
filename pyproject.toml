@@ -1,0 +1,43 @@
+[project]
+name = "knowledge-hub"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "alembic>=1.20.0",
+    "argon2-cffi>=23.1",
+    "asyncpg>=0.31.0",
+    "email-validator>=2.3.0",
+    "fastapi>=0.142.2",
+    "jieba>=0.42.1",
+    "markitdown[docx,pdf,pptx,xlsx]>=0.1.8",
+    "openpyxl>=3.1.5",
+    "peft>=0.21.2",
+    "pillow>=12.3.0",
+    "psycopg[binary]>=3.2",
+    "pydantic-settings>=2.15.0",
+    "pymupdf>=1.28.2",
+    "python-docx>=1.2.0",
+    "python-multipart>=0.0.32",
+    "python-pptx>=1.0.2",
+    "qdrant-client>=1.19.1",
+    "sentence-transformers[image]>=6.1.0",
+    "sqlalchemy[asyncio]>=2.0",
+    "transformers>=5.18.0",
+    "unstructured[local-inference]>=0.27.10",
+    "uvicorn>=0.54.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    # async 测试支持。检索腿全是 async（Qdrant / PG 都是 IO 等待，
+    # 不该占着 event loop）。没有它就只能用 asyncio.run() 包一层，
+    # 而那会踩 PROGRESS §5.17 的"一个进程内所有异步操作必须在同一个 loop"。
+    #
+    # anyio 自带 pytest 插件（`anyio_backend` fixture），**不需要**额外的包
+    # —— 之前误加了 `pytest-anyio`，它只在 PyPI 上有 0.0.0 占位版本。
+    # 在 pytest.ini 里用 `anyio_mode = auto` 或显式声明 fixture。
+    "anyio>=4.0",
+]

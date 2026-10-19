@@ -1,0 +1,451 @@
+/* ============================================================
+ * 样式入口 —— TailwindCSS v4 + 语义设计 token（D188 全量重写）
+ * ============================================================
+ *
+ * ## 分层（决定"谁覆盖谁"）
+ *
+ * ```
+ * theme < base < components < utilities
+ * ```
+ *
+ * - `theme`：Tailwind 生成的设计变量（下面 `@theme inline` 指到语义变量）。
+ * - `base`：Tailwind preflight + 一小段基础排版（正文字号 / 标题阶梯 / 字体栈）。
+ * - `components`：**空** —— 组件都在 `src/components/ui/*`，用 utility 组合。
+ * - `utilities`：Tailwind utility（含下面 `@utility` 的项目级小工具）。
+ *
+ * ## token 命名：**沿用 RAGFlow**（REWRITE-PLAN §3.2）
+ *
+ * 参考项目 RAGFlow 与我们同栈（React + TS + Tailwind + shadcn，Apache-2.0），
+ * 允许**逐字照搬组件代码**。它用自己那套 token 名（`bg-bg-base` /
+ * `text-text-primary` / `border-border-button` / `bg-bg-card` …）⇒ 这里**照抄它的
+ * 命名与色值**，拷进来的 class 才能原样生效，不必逐行改名。
+ * 版权与出处记在 `web/THIRD-PARTY-NOTICES.md`。
+ *
+ * ## 颜色契约（仍然是唯一的一条）
+ *
+ * 🔑 **具体颜色只许出现在下面 `:root` / `.dark` 这两段**；组件层一律用
+ * utility（`bg-bg-base` / `text-text-secondary`）或 `var(--x)`。
+ * 散落的硬编码是"加一个主题必然漏几处"的成因 —— 症状是某一块在另一套主题下
+ * 恰好看不清，而漏掉的那处没有任何东西会报错。
+ *
+ * ## 主题生效机制（REWRITE-PLAN §4）
+ *
+ * `<html class="dark">` 是**唯一**开关：
+ * - `index.html` 里的**普通内联脚本**在首绘前按"存储偏好 / 系统"加类（不闪色）；
+ * - `src/app/theme.ts` 是运行时唯一的写入方（设置 → 外观 那一个入口）；
+ * - 组件层不写 `dark:` 也行（token 自己会换），但照搬来的 RAGFlow 组件里
+ *   有 `dark:` ⇒ 下面用 `@custom-variant` 把它绑到 `.dark` 类上。
+ */
+
+@layer theme, base, components, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/* 只扫前端源码，别把 node_modules / dist 里的字符串当类名。 */
+@source "./";
+
+/* 照搬来的 RAGFlow 组件里有 `dark:` 变体。Tailwind v4 默认把 `dark:` 绑到
+   `prefers-color-scheme`，而我们的主题是**类**驱动的（`<html class="dark">`）
+   ⇒ 必须改绑；否则那几处（输入框密码按钮、表格滚动条…）永远跟着系统走，
+   用户手动选浅色时它们还是暗的。 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------- Tailwind 设计变量 ↔ 语义 CSS 变量（单一来源）---------- */
+/* `inline` 是必需的：这些值引用的是会随 `.dark` 变的运行时变量，
+   utility 必须直接吐出 `var(--bg-base)`，而不是复制一份快照。 */
+@theme inline {
+  /* ===== RAGFlow 设计 token（照抄它的命名）===== */
+  --color-bg-base: var(--bg-base);
+  --color-bg-title: var(--bg-title);
+  --color-bg-card: var(--bg-card);
+  --color-bg-component: var(--bg-component);
+  --color-bg-input: var(--bg-input);
+  --color-bg-canvas: var(--bg-canvas);
+  --color-bg-list: var(--bg-list);
+  --color-bg-accent: var(--bg-accent);
+  --color-bg-member: var(--bg-member);
+
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-disabled: var(--text-disabled);
+  --color-text-badge: var(--text-badge);
+  --color-text-title: var(--text-title);
+  --color-text-sub-title: var(--text-sub-title);
+  --color-text-sub-title-invert: var(--text-sub-title-invert);
+
+  --color-border-default: var(--border-default);
+  --color-border-accent: var(--border-accent);
+  --color-border-button: var(--border-button);
+  --color-input-border: var(--input-border);
+
+  --color-accent-primary: var(--accent-primary);
+  --color-state-success: var(--state-success);
+  --color-state-warning: var(--state-warning);
+  --color-state-error: var(--state-error);
+  --color-state-error-5: var(--state-error-5);
+  --color-state-success-5: var(--state-success-5);
+  --color-state-warning-5: var(--state-warning-5);
+
+  --color-background-card: var(--background-card);
+  --color-background-header-bar: var(--background-header-bar);
+  --color-background-highlight: var(--background-highlight);
+  --color-background-inverse-standard: var(--background-inverse-standard);
+  --color-background-inverse-standard-foreground: var(--background-inverse-standard-foreground);
+  --color-background-inverse-strong: var(--background-inverse-strong);
+  --color-background-inverse-strong-foreground: var(--background-inverse-strong-foreground);
+  --color-background-core-weak: var(--background-core-weak);
+
+  /* ===== shadcn 那套别名（照搬的组件里也在用：`text-muted-foreground` /
+     `border-border` / `bg-muted/50` / `text-foreground`）===== */
+  --color-background: var(--bg-base);
+  --color-foreground: var(--text-primary);
+  --color-border: var(--border-button);
+  --color-input: var(--border-button);
+  --color-ring: var(--accent-primary);
+  --color-primary: var(--text-primary);
+  --color-primary-foreground: var(--bg-base);
+  --color-secondary: var(--bg-card);
+  --color-secondary-foreground: var(--text-primary);
+  --color-muted: var(--bg-card);
+  --color-muted-foreground: var(--text-secondary);
+  --color-accent: var(--bg-card);
+  --color-accent-foreground: var(--text-primary);
+  --color-destructive: var(--state-error);
+  --color-destructive-foreground: #ffffff;
+  --color-popover: var(--bg-component);
+  --color-popover-foreground: var(--text-primary);
+  --color-card: var(--bg-component);
+  --color-card-foreground: var(--text-primary);
+
+  /* ===== 本项目自有语义（纯逻辑单测里钉住的那些"性质"靠它们上色）===== */
+  /* 任务四态（`lib/progress.ts::Tone`）：进度条填充 / 文字 / 边框同族 */
+  --color-tone-working: var(--state-warning);
+  --color-tone-ready: var(--state-success);
+  --color-tone-failed: var(--state-error);
+  --color-tone-cancelled: var(--text-disabled);
+  /* 三档可见性徽章 */
+  --color-vis-private: var(--text-secondary);
+  --color-vis-workspace: #0369a1;
+  --color-vis-global: #7c3aed;
+  /* 检索命中高亮 */
+  --color-mark: var(--mark);
+  --color-mark-fg: var(--mark-fg);
+  /* 引用角标 */
+  --color-cite: var(--cite);
+  /* 时间线强度 0~3（`lib/timeline.ts::intensity`） */
+  --color-cal-lv1: var(--cal-lv1);
+  --color-cal-lv2: var(--cal-lv2);
+  --color-cal-lv3: var(--cal-lv3);
+  /* 页图纸面 + 命中框（**刻意不随主题变**：框画在页图的白纸上，见 CONVENTIONS §6.1） */
+  --color-paper: var(--paper);
+  --color-box: var(--box);
+  --color-scrim: var(--scrim);
+
+  /* 字体：系统栈 + 中文回退，**不引 Web Font**（内网/离线部署） */
+  --font-sans:
+    system-ui, -apple-system, "Segoe UI", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* 字号阶梯：内置 xs/sm/base/lg/xl 不动，只补两个本项目在用的 */
+  --text-2xs: 11px;
+  --text-13: 13px;
+
+  /* 行高：助手正文比控件松（对齐 Open WebUI 的阅读列观感） */
+  --leading-body: 1.7;
+
+  /* 动效（Dialog / Sheet 靠它们；不引 tailwindcss-animate） */
+  --animate-overlay-in: overlay-in 140ms ease-out;
+  --animate-overlay-out: overlay-out 120ms ease-in;
+  --animate-content-in: content-in 160ms cubic-bezier(0.2, 0, 0, 1);
+  --animate-sheet-in-start: sheet-in-start 200ms cubic-bezier(0.2, 0, 0, 1);
+  --animate-sheet-in-end: sheet-in-end 200ms cubic-bezier(0.2, 0, 0, 1);
+
+  @keyframes overlay-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes overlay-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+  @keyframes content-in {
+    from {
+      opacity: 0;
+      transform: translate(-50%, -48%) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
+  }
+  @keyframes sheet-in-start {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+  @keyframes sheet-in-end {
+    from {
+      transform: translateX(100%);
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+}
+
+/* ---------- 调色板 · 浅色（RAGFlow light）---------- */
+:root {
+  color-scheme: light;
+
+  --bg-base: #ffffff;
+  --bg-canvas: #f6f6f7;
+  --bg-title: #f6f6f7;
+  --bg-component: #ffffff;
+  /* 表格底 / 行 hover / 次级按钮底：同一族极淡的黑 */
+  --bg-card: rgba(22, 22, 24, 0.05);
+  --bg-input: rgba(22, 22, 24, 0.05);
+  --bg-list: #f6f6f7;
+  --bg-accent: rgba(76, 164, 231, 0.05);
+  --bg-member: rgba(92, 150, 200, 0.1);
+
+  --text-primary: #161618;
+  --text-secondary: #75787a;
+  --text-disabled: #b2b5b7;
+  --text-badge: #979aab;
+  --text-title: #161618;
+  --text-sub-title: #979aab;
+  --text-sub-title-invert: #5b5d6a;
+
+  --border-default: rgba(0, 0, 0, 0.2);
+  --border-accent: #000000;
+  --border-button: rgba(0, 0, 0, 0.1);
+  --input-border: rgba(22, 22, 24, 0.2);
+
+  /* 强调色克制：RAGFlow 只在 focus ring / 高亮变体上用它，
+     主按钮是 `bg-text-primary text-bg-base`（近黑）。 */
+  --accent-primary: #00beb4;
+
+  --state-success: #3ba05c;
+  --state-warning: #faad14;
+  --state-error: #d8494b;
+  --state-success-5: rgba(59, 160, 92, 0.05);
+  --state-warning-5: rgba(250, 173, 20, 0.05);
+  --state-error-5: rgba(216, 73, 75, 0.05);
+
+  --background-card: rgba(22, 22, 24, 0.05);
+  --background-header-bar: rgba(0, 0, 0, 0.05);
+  --background-highlight: rgba(76, 164, 231, 0.1);
+  --background-inverse-standard: rgba(230, 227, 246, 0.15);
+  --background-inverse-standard-foreground: #5c5151;
+  --background-inverse-strong: rgba(255, 255, 255, 0.15);
+  --background-inverse-strong-foreground: #161618;
+  --background-core-weak: #654bf8;
+
+  /* 检索命中高亮（琥珀，与页图上的绿/蓝框区分开） */
+  --mark: #ffe08a;
+  --mark-fg: #1f2937;
+  /* 引用角标 */
+  --cite: #0f766e;
+
+  /* 时间线强度 0~3：⚠️ 保持 `color-mix(accent, base)`（跟随主题，别改硬编码） */
+  --cal-lv1: color-mix(in srgb, var(--accent-primary) 12%, var(--bg-component));
+  --cal-lv2: color-mix(in srgb, var(--accent-primary) 28%, var(--bg-component));
+  --cal-lv3: color-mix(in srgb, var(--accent-primary) 46%, var(--bg-component));
+
+  --scrim: rgba(15, 23, 42, 0.45);
+
+  /* ⚠️ 下面两个**不随主题变**，是刻意的：框画在**页图的白色纸面**上
+     （CONVENTIONS §6.1 / §10.3），换主题只改周围界面，改框会连带改掉它与纸面的对比度。 */
+  --box: #ffb020;
+  --paper: #ffffff;
+}
+
+/* ---------- 调色板 · 深色（RAGFlow dark）---------- */
+.dark {
+  color-scheme: dark;
+
+  --bg-base: #161618;
+  --bg-canvas: #0f0f10;
+  --bg-title: #38383a;
+  --bg-component: #202025;
+  --bg-card: rgba(255, 255, 255, 0.05);
+  --bg-input: rgba(255, 255, 255, 0.05);
+  --bg-list: #38383a;
+  --bg-accent: rgba(76, 164, 231, 0.05);
+  --bg-member: rgba(92, 150, 200, 0.1);
+
+  --text-primary: #f6f6f7;
+  --text-secondary: #b2b5b7;
+  --text-disabled: #75787a;
+  --text-badge: #979aab;
+  --text-title: #ffffff;
+  --text-sub-title: #5b5d6a;
+  --text-sub-title-invert: #979aab;
+
+  --border-default: rgba(255, 255, 255, 0.2);
+  --border-accent: #ffffff;
+  --border-button: rgba(255, 255, 255, 0.1);
+  --input-border: rgba(255, 255, 255, 0.2);
+
+  --accent-primary: #00beb4;
+
+  --state-success: #3ba05c;
+  --state-warning: #faad14;
+  --state-error: #d8494b;
+  --state-success-5: rgba(59, 160, 92, 0.12);
+  --state-warning-5: rgba(250, 173, 20, 0.12);
+  --state-error-5: rgba(216, 73, 75, 0.12);
+
+  --background-card: rgba(255, 255, 255, 0.05);
+  --background-header-bar: #0b0b0c;
+  --background-highlight: rgba(76, 164, 231, 0.1);
+  --background-inverse-standard: rgba(230, 227, 246, 0.15);
+  --background-inverse-standard-foreground: #ffffff;
+  --background-inverse-strong: rgba(255, 255, 255, 0.15);
+  --background-inverse-strong-foreground: #ffffff;
+  --background-core-weak: #654bf8;
+
+  --mark: #3d5a80;
+  --mark-fg: #ffffff;
+  --cite: #7dd3fc;
+
+  --cal-lv1: color-mix(in srgb, var(--accent-primary) 16%, var(--bg-component));
+  --cal-lv2: color-mix(in srgb, var(--accent-primary) 32%, var(--bg-component));
+  --cal-lv3: color-mix(in srgb, var(--accent-primary) 52%, var(--bg-component));
+
+  --scrim: rgba(2, 6, 23, 0.7);
+}
+
+/* ---------- 基础排版 ---------- */
+/* preflight 把标题重置为 `font-size: inherit`，这里按原来的阶梯补回来，
+   免得"迁移后标题悄悄变小"（没有东西会报错，肉眼也不一定当场发现）。 */
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  html {
+    font-family: var(--font-sans);
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--bg-canvas);
+    color: var(--text-primary);
+    font-size: 14px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--accent-primary) 26%, transparent);
+  }
+  /* 低干扰滚动条（两套主题都跟随语义变量，不写字面色） */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-default) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--text-primary) 22%, transparent);
+    border: 3px solid transparent;
+    border-radius: 9999px;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--text-primary) 34%, transparent);
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-track,
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  h1 {
+    margin: 0 0 8px;
+    font-size: 20px;
+    font-weight: 600;
+  }
+  h2 {
+    margin: 0 0 8px;
+    font-size: 18px;
+    font-weight: 600;
+  }
+  h3 {
+    margin: 0 0 8px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  h4 {
+    margin: 0 0 8px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+}
+
+/* ---------- 项目级小工具 ---------- */
+/* `@utility` 定义的是**真正的 Tailwind 工具类**（进 utilities 层、可被
+   tree-shake、可加变体），不是"迁移残留的 class + CSS"。 */
+@utility muted {
+  color: var(--text-secondary);
+}
+@utility tiny {
+  font-size: 12px;
+}
+@utility ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+@utility ellipsis2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+/* RAGFlow 的 `border-0.5` 在 v4 里写成 `border-[0.5px]`（数字 utility 不收小数），
+   所以组件层统一用 arbitrary value，不在这里补 utility。 */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+/* RAGFlow 的 `scrollbar-auto`（表格容器用）：细滚动条 + hover 才显形。 */
+@utility scrollbar-auto {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-default) transparent;
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background-color: transparent;
+    border-radius: 3px;
+    transition: background-color 0.2s ease;
+  }
+  &:hover::-webkit-scrollbar-thumb,
+  &:focus::-webkit-scrollbar-thumb {
+    background-color: color-mix(in srgb, var(--text-primary) 30%, transparent);
+  }
+}

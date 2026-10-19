@@ -1,0 +1,44 @@
+name: pkh
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: pkh-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pkh}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pkh_local_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-pkh}
+      # 中文排序/大小写不敏感邮箱需要
+      POSTGRES_INITDB_ARGS: "--locale=C.UTF-8"
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pkh} -d ${POSTGRES_DB:-pkh}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # 扩展（pg_trgm 等）由 alembic 迁移创建，不用 initdb 脚本
+
+  qdrant:
+    image: qdrant/qdrant:v1.15.1
+    container_name: pkh-qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      # 镜像里没有 curl/wget/nc，只有 bash。
+      # /dev/tcp 是 bash 语法，必须显式用 bash 而不是默认的 /bin/sh(dash)。
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
+  qdrant_data:

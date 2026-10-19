@@ -1,0 +1,59 @@
+# ===== 隐私数据：绝不提交 =====
+data/
+*.faiss
+*.jsonl
+*.pkl
+*.db
+*.sqlite
+
+# ===== 本地评测集 / 报告：含**真实语料**的问句、原文片段与生成答案 =====
+# `eval/_qset.py` 是人工标注的评测问题集（真值文件名 + 原文片段），
+# `reports/*.json` 是回放结果（含答案正文）。两者都可能含个人资料 ⇒ 只在本地。
+# 模板见 `eval/_qset.example.py`；评测脚本会提示怎么生成。
+reports/
+eval/_qset.py
+eval/_local_data.py
+tests/_real_data_denylist.txt
+
+# ===== 环境与密钥 =====
+.env
+.env.local
+
+# ===== Python =====
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+uv.lock.bak
+
+# ===== 模型缓存（大文件）=====
+models/
+.huggingface/
+
+# ===== 本地基础设施 =====
+qdrant_data/
+
+# ===== OS/IDE =====
+.DS_Store
+.idea/
+.vscode/
+
+# 用于存放参考项目
+.research
+
+# ===== 本地开发文档（不进仓库）=====
+# 内部交接/决策/踩坑记录：对开发有用，但不适合公开（含个人环境细节与内部叙事）。
+# 面向读者的文档在 docs/。
+.docs/
+
+# ===== 本地工具与运行时标记（不进仓库）=====
+# `~/.agents/skills` 这类是本地 AI 协作技能文件，与产品无关。
+.agents/
+# Qdrant 初始化标记（由初始化脚本生成，不是源码）
+.qdrant-initialized
+
+# ===== CI 复现导出目录（`git archive HEAD | tar -x` 生成）=====
+# ⚠️ 它是**整个源码树的副本**，不是源码。忘了删就会被打包进提交（踩过一次）——
+#    所以既 gitignore，也在文档里写明"用完立刻删"。
+.ci-repro/

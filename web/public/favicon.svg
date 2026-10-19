@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="PKH">
+  <!--
+    🔑 手写 SVG 而不是放一个 png：仓库里所有图示都是文本，
+       一个二进制文件会破坏 diff 可读性；而且 favicon 只有 16×16，
+       位图在这里没有任何优势（放大后糊成一团）。
+    ⚠️ 三层底 + 一个钩子：缩到 16px 时最上面那层的箭头会糊，
+       所以箭头刻意画粗、底色刻意只用两档明暗（见对比度断言）。
+  -->
+  <rect width="64" height="64" rx="12" fill="#0f1420" />
+  <path d="M14 44h20a10 10 0 0 0 10-10V26" fill="none" stroke="#3d6bd6"
+        stroke-width="6" stroke-linecap="round" />
+  <path d="M14 20v24" fill="none" stroke="#8ab4ff" stroke-width="6" stroke-linecap="round" />
+  <path d="M36 20l8 6-8 6z" fill="#8ab4ff" />
+</svg>

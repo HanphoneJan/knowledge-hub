@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- 🔑 显式引 favicon：浏览器会自动去要 `/favicon.ico`，
+         那个文件不存在 → 每次刷页一条 404。引了 svg 之后那条 404 就没了。 -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- 手机浏览器地址栏跟着系统走；它只有系统这一维信息，
+         手动指定的主题管不到这里（用户看不到地址栏，不值得为它加 JS）。 -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f6f7" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f0f10" />
+    <title>Knowledge Hub</title>
+
+    <!-- 🔑 主题：首绘前把偏好写到 `<html class="dark">`（D188 / REWRITE-PLAN §4）。
+         生效逻辑全在 styles.css（`.dark` 那一段调色板），
+         这段只做"读存储 + 跟随系统 → 加类"，因此可以极小。
+         ⚠️ 必须是**普通脚本**：`type="module"` 是 deferred 的，不保证在首绘前跑完，
+            而 React mount 之后才加类就晚了 —— 症状是刷新时闪一下另一个主题。
+         ⚠️ 这里认可的三个字面量、存储键、写入目标必须与 `src/app/theme.ts`
+            的 `THEME_PREFS` / `THEME_KEY` / `applyTheme` 一致；
+            `src/app/theme.test.ts` 有一条守卫扫这段 HTML（两处复刻的判定迟早会漂）。 -->
+    <script>
+      try {
+        var t = localStorage.getItem("pkh.theme");
+        var dark =
+          t === "dark" ||
+          (t !== "light" &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches);
+        if (dark) document.documentElement.classList.add("dark");
+      } catch (e) {
+        /* 隐私模式下 localStorage 会抛：不管，落到跟随系统 */
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
