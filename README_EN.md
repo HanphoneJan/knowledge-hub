@@ -40,9 +40,11 @@ bash deploy/visual.sh {start|stop|restart|status|logs}   # manage the 2.65 GB vi
 cd web && npm run build       # frontend build is served by the API at http://127.0.0.1:8010
 ```
 
-Full runbook: [`docs/README.md`](docs/README.md) · [`docs/architecture.md`](docs/architecture.md) ·
-[`docs/retrieval.md`](docs/retrieval.md) · [`docs/ingestion.md`](docs/ingestion.md) ·
-[`docs/DESIGN-API.md`](docs/DESIGN-API.md) · [`web/README.md`](web/README.md) · [`deploy/README.md`](deploy/README.md).
+Contract: [`docs/DESIGN-API.md`](docs/DESIGN-API.md) · frontend: [`web/README.md`](web/README.md) ·
+deploy: [`deploy/README.md`](deploy/README.md).
+
+Reader-facing guides (architecture, ingestion, retrieval, data model) were removed and are being
+rewritten. Until they land, the code, the tests and the contract are the source of truth.
 
 ## CI vs. full baseline
 

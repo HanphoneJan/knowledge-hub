@@ -144,8 +144,7 @@ services/
   worker/       handlers/（摄取与清理任务）+ doc_state.py（终态判定）
   mcp/          MCP Server（4 个工具）
 web/            React + Vite 前端（架构与规矩见 web/README.md）
-docs/           架构 · 摄取 · 检索 · 数据模型 · 多租户 · 任务与运维 · 接口 · 前端 · 测试 · 踩坑
-                + API 契约（DESIGN-API.md）+ diagrams/（draw.io 源文件与 SVG）
+docs/           API 契约（DESIGN-API.md）+ 界面截图（img/）；读者文档重写中
 deploy/         dev.sh / ci.sh / monitor.py / backup.sh / restore.sh / seed_photos.py
                 measure_visual_leg.py / verify_*.py（手工验证脚本，不在基线里）
 eval/           三套验收脚本 + contract_check.py + _fixtures.py + _reset.py
@@ -158,22 +157,9 @@ tests/          pytest
 
 ## 文档
 
-面向读者的文档在 [`docs/`](./docs)：架构总览、文档摄取、检索与问答、数据模型、多租户、任务与运维、**API 契约**（82 个端点）、MCP/A2A、前端、测试验收与踩坑。
+契约在 [`docs/DESIGN-API.md`](./docs/DESIGN-API.md)：82 个端点、错误码、分页，改端点先改它 —— `eval/contract_check.py` 会逐条校验。
 
-| 文档 | 讲什么 |
-|---|---|
-| [`docs/README.md`](./docs/README.md) | 索引与按目标挑读法 |
-| [`docs/architecture.md`](./docs/architecture.md) | 三个进程、两个存储、上传与检索主链路、刻意的边界 |
-| [`docs/ingestion.md`](./docs/ingestion.md) | 解析器、六种切分策略、分层校验、坐标、PII 与导入 |
-| [`docs/retrieval.md`](./docs/retrieval.md) | 四条腿、RRF、查询路由、改写 / 精排 / 拒答、SSE 与 L3 |
-| [`docs/data-model.md`](./docs/data-model.md) | 18 张表、Qdrant 三集合、稳定点 ID、删除链与对账 |
-| [`docs/tenancy.md`](./docs/tenancy.md) | API Key、三档可见性、fail-closed、邀请码、审计与隐私 |
-| [`docs/jobs-operations.md`](./docs/jobs-operations.md) | 任务队列、文档终态、进程与内存、巡检、备份、蓝绿重建 |
-| [`docs/DESIGN-API.md`](./docs/DESIGN-API.md) | **API 契约**（82 个端点、错误码、分页）。改端点先改它 —— `eval/contract_check.py` 会校验 |
-| [`docs/api-mcp-a2a.md`](./docs/api-mcp-a2a.md) | HTTP 约定、MCP 四个工具、A2A 两个 skill、契约治理 |
-| [`docs/frontend.md`](./docs/frontend.md) | 外壳与路由、SSE、引用画框、知识库与设置、主题 |
-| [`docs/testing.md`](./docs/testing.md) | 五层验收、CI 门禁、检索回放与结构守卫 |
-| [`docs/pitfalls.md`](./docs/pitfalls.md) | 五条硬约束与一批“不报错但结果是错的”问题 |
+面向读者的架构、摄取、检索、数据模型、多租户、任务与运维、接口、测试与踩坑说明**已移除旧稿，正在重写**。重写完成前，代码、测试与契约是唯一事实来源；新文档落回 `docs/` 后在这里补一张表。
 
 ## 五条硬约束（违反即错）
 
