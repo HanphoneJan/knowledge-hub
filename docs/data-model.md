@@ -1,409 +1,137 @@
-# 数据模型与存储
+# 数据模型与一致性
 
-> 本文只写**现在是什么**。设计理由见 [项目深度拆解](./deep-dive.md) 与 [架构总览](./architecture.md)。
+Knowledge Hub 的数据分三处存：PostgreSQL、Qdrant 和本地文件系统。它们不是对等的三份副本，而是“一份真相 + 一份可重建索引 + 一份原件”。
 
----
-
-## 1. 存储拓扑
-
-```
-PostgreSQL 16 (pgvector/pgvector:pg16)
-  真相源：用户 / 工作区 / 知识库 / 文档 / chunk 元数据
-          任务队列 / 审计日志 / 全文子串索引(trgm) / 会话与消息
-
-Qdrant 1.15.1（standalone 二进制）
-  kb_dense   dense 512d      bge-small-zh-v1.5
-  kb_sparse  sparse         jieba + BM25
-  kb_visual  multi 128d     colSmol-500M（max_sim）
-
-本地文件系统
-  data/blobs/{sha[:2]}/{sha}/original|preview.pdf|thumbs/
-```
-
-**为什么装了 pgvector 却不用**：全局统一一个嵌入模型 + Qdrant 是既有选型；pgvector 不支持 late-interaction 多向量。装 pgvector 只是为了镜像自带 `pg_trgm`。
-
----
-
-## 2. PostgreSQL 表结构
-
-### 2.1 身份与工作区
-
-```sql
-CREATE TABLE users (
-    id            BIGSERIAL PRIMARY KEY,
-    email         CITEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,              -- argon2
-    display_name  TEXT NOT NULL,
-    role          TEXT NOT NULL DEFAULT 'user'
-                  CHECK (role IN ('user','superadmin')),  -- 全局角色
-    nickname      TEXT UNIQUE,                -- 唯一昵称，可作登录名
-    is_active     BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE workspaces (
-    id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL, description TEXT,
-    owner_id BIGINT NOT NULL REFERENCES users(id),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(), deleted_at TIMESTAMPTZ
-);
-
-CREATE TABLE workspace_members (
-    workspace_id BIGINT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    user_id      BIGINT NOT NULL REFERENCES users(id)      ON DELETE CASCADE,
-    role         TEXT NOT NULL CHECK (role IN ('owner','member')),
-    invited_by   BIGINT REFERENCES users(id),
-    joined_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (workspace_id, user_id)
-);
-```
-
-> **role 只有两档**：暂不做完整 RBAC。⚠️ `users.role`（全局角色）与 `workspace_members.role`（owner/member）**不是一回事**。
-
-邀请码表 `workspace_invites` 只存 **HMAC-SHA256 哈希 + 前 4 位**，不存明文；默认 7 天 / 1 次，`used <= max_uses` 由数据库 CHECK 约束。
-
-### 2.2 知识库
-
-```sql
-CREATE TYPE kb_visibility AS ENUM ('private', 'workspace', 'global');
-CREATE TYPE kb_source_kind AS ENUM ('file', 'chat', 'photo');
-
-CREATE TABLE knowledge_bases (
-    id BIGSERIAL PRIMARY KEY,
-    workspace_id BIGINT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    name TEXT NOT NULL, description TEXT,
-    visibility   kb_visibility  NOT NULL DEFAULT 'private',
-    source_kind  kb_source_kind NOT NULL DEFAULT 'file',
-    embed_model  TEXT NOT NULL DEFAULT 'BAAI/bge-small-zh-v1.5',  -- 全局统一
-    chunk_size   INT  NOT NULL DEFAULT 500,
-    chunk_overlap INT NOT NULL DEFAULT 50,
-    chunk_strategy TEXT NOT NULL DEFAULT 'recursive',
-    generate_image_desc BOOLEAN NOT NULL DEFAULT FALSE,
-    rerank_model TEXT,                    -- 空 = 不启用精排
-    pii_mask     BOOLEAN NOT NULL DEFAULT FALSE,
-    created_by   BIGINT NOT NULL REFERENCES users(id),
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    deleted_at   TIMESTAMPTZ
-);
-CREATE INDEX ON knowledge_bases (workspace_id) WHERE deleted_at IS NULL;
-```
-
-### 2.3 文档
-
-```sql
-CREATE TYPE doc_status AS ENUM
-  ('pending','parsing','chunking','embedding','ready','failed','deleted');
-CREATE TYPE doc_source AS ENUM ('upload','chat_import','photo_dir');
-
-CREATE TABLE documents (
-    id BIGSERIAL PRIMARY KEY,
-    kb_id BIGINT NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
-    file_name    TEXT NOT NULL,           -- 覆盖式更新，同一 (kb_id, file_name) 可有多个版本
-    source_path  TEXT,                    -- 聊天 KB 专用：chat-2025-02-14
-    content_hash TEXT NOT NULL,           -- sha256，判重
-    blob_sha     TEXT NOT NULL REFERENCES blobs(sha256),
-    mime_type    TEXT, size_bytes BIGINT,
-    doc_source   doc_source NOT NULL DEFAULT 'upload',
-    status       doc_status NOT NULL DEFAULT 'pending',
-    status_msg   TEXT,                    -- 失败原因
-    quality      JSONB,                   -- 三层校验报告
-    is_current   BOOLEAN NOT NULL DEFAULT TRUE,
-    version_id   INT NOT NULL DEFAULT 1,
-    page_count   INT, chunk_count INT DEFAULT 0,
-    scan_pages   INT[],                   -- 页级索引的 PG 真相来源（NULL=未知）
-    pii_hits     JSONB,                   -- 摄取时掩码前记下
-    taken_at     TIMESTAMPTZ,             -- 照片拍摄日期（EXIF/文件名，不猜）
-    uploaded_by  BIGINT NOT NULL REFERENCES users(id),
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    deleted_at   TIMESTAMPTZ
-);
-CREATE INDEX ON documents (kb_id) WHERE is_current AND deleted_at IS NULL;
-CREATE INDEX ON documents (status) WHERE deleted_at IS NULL;
-```
-
-几个字段的语义容易记错：
-
-| 字段 | 含义 | 常见误解 |
+| 存储 | 存什么 | 能不能重建 |
 |---|---|---|
-| `id` | 文档主键 | 不是 `doc_id`。`DocumentOut` 上有个 `doc_id` property，但 pydantic 不序列化普通 property |
-| `version_id` | 同一 `(kb_id, file_name)` 的版本号 | 覆盖式更新 +1，不做完整版本历史 |
-| `is_current` | 是否当前版本 | 检索只返回 `is_current` |
-| `quality` | 三层校验报告 + `strategy_notes` | 扫描件的 `parse` 是 `skipped`，不是 `passed` |
-| `scan_pages` | 哪些页走视觉腿 | 视觉腿对账的 PG 真相来源 |
-| `pii_hits` | 掩码**前**的检出数 | 开了掩码后仍能回答“原文里有多少” |
+| PostgreSQL 16（pgvector 镜像） | 用户、工作区、知识库、文档、chunk 文本与坐标、任务、审计、会话、BM25 词表 | 不能，备份的核心 |
+| Qdrant 1.15.1 | `kb_dense`、`kb_sparse`、`kb_visual` 三个集合 | 文本两腿能从 PG 重建；视觉腿要重新摄取 |
+| 本地磁盘 | `data/blobs/{sha[:2]}/{sha}/original`、`preview.pdf`、`thumbs/` | 原件不能重建 |
 
-### 2.4 Blob（内容寻址存储）
+镜像里虽然装了 pgvector，但向量没有放进 PostgreSQL：全局只用一个文本嵌入模型，Qdrant 是既有选型，而且 pgvector 不支持 late-interaction 多向量，与视觉腿冲突。装 pgvector 只是因为镜像自带 `pg_trgm`。
 
-```sql
-CREATE TABLE blobs (
-    sha256 TEXT PRIMARY KEY, size_bytes BIGINT NOT NULL, mime_type TEXT,
-    storage_path TEXT NOT NULL, ref_count INT NOT NULL DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-```
+## PostgreSQL 的 18 张表怎么分组？
 
-**为什么不用 `ON DELETE CASCADE` 直接删文件**：同一份文件可能被多个文档版本引用（覆盖式更新后旧版本仍在回收站）。引用计数归零才物理删除。
+`services/common/models.py` 里定义了 18 张表，可以按职责分成五组：
 
-> ⚠️ `storage_path` 这一列**不是存储抽象**：写入时是 `str(blob_path(sha256))`，没有任何代码读它做分发。要上对象存储时先做只读远端副本。
-
-### 2.5 Chunk 元数据
-
-```sql
-CREATE TABLE chunks (
-    id BIGSERIAL PRIMARY KEY,
-    doc_id BIGINT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-    chunk_index INT NOT NULL,
-    content_norm TEXT NOT NULL,          -- 归一化文本（用于嵌入）
-    char_start INT, char_end INT,        -- 在原文中的偏移
-    locations JSONB,                     -- L3 坐标矩形数组，归一化 0~1
-    token_count INT,
-    kind TEXT NOT NULL DEFAULT 'text',   -- text | table | page | chat
-    table_index INT, row_count INT, col_count INT,
-    table_json  JSONB,                   -- 表格结构化网格 {header,rows,row_count,col_count}
-    parent_text  TEXT,                   -- 父块上下文，**不进向量库**
-    section_path TEXT,                   -- 章节路径 H1 > H2 > H3
-    CONSTRAINT ck_chunk_kind CHECK (kind IN ('text','table','page','chat')),
-    UNIQUE (doc_id, chunk_index)
-);
-CREATE INDEX ON chunks (doc_id);
-CREATE INDEX chunks_trgm ON chunks USING gin (content_norm gin_trgm_ops);
-```
-
-实测依据：bbox 归一化后往返误差 **0.00e+00 point**，与 DPI 无关；正文 chunk 恰好 **1 个框**；表格 chunk 每非空单元格 1 个框（实测最多 **40**，带 `row`/`col`）；成本 8~9 ms/页。
-
-> ⚠️ 画框时必须先把归一化坐标乘回 PDF point；表格框取自 `tbl.rows[i].cells`，不是扁平的 `tbl.cells`。
-
-### 2.6 任务队列
-
-```sql
-CREATE TABLE jobs (
-    id BIGSERIAL PRIMARY KEY,
-    kind TEXT NOT NULL,                  -- ingest / embed_visual / thumbnail / pdf_preview
-                                         -- cleanup / import_chat / import_dir / reindex
-    doc_id BIGINT REFERENCES documents(id) ON DELETE CASCADE,
-    kb_id  BIGINT REFERENCES knowledge_bases(id) ON DELETE CASCADE,
-    status TEXT NOT NULL DEFAULT 'pending'
-           CHECK (status IN ('pending','running','done','failed','cancelled')),
-    progress REAL NOT NULL DEFAULT 0,
-    attempts INT NOT NULL DEFAULT 0,
-    max_attempts INT NOT NULL DEFAULT 3,
-    error TEXT, payload JSONB,
-    locked_at TIMESTAMPTZ, locked_by TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX jobs_poll ON jobs (status, created_at) WHERE status = 'pending';
-CREATE INDEX jobs_doc ON jobs (doc_id);
-```
-
-worker 领取协议（防重复消费）：
-
-```sql
-UPDATE jobs SET status='running', ...
-WHERE id = (
-  SELECT id FROM jobs
-  WHERE status='pending'
-    AND (locked_at IS NULL OR locked_at < now() - interval '5 min')
-  ORDER BY created_at
-  LIMIT 1
-  FOR UPDATE SKIP LOCKED
-) RETURNING *;
-```
-
-> ⚠️ 这里**不用 ENUM**：autogenerate 不检测 ENUM / CHECK 的值变更，用 TEXT + CHECK 至少能让人看见差异。改任何 kind 都要在三处登记：`common/jobs.py` 的 `ALL_KINDS`、`worker/handlers/__init__.py` 的 `HANDLERS`、`models.py` 的 CHECK 约束 + 一条手写迁移。
-
-### 2.7 认证与审计
-
-```sql
-CREATE TABLE api_keys (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    key_hash TEXT NOT NULL UNIQUE,        -- 完整 sha256(明文)，不存明文
-    key_prefix TEXT NOT NULL,             -- 前若干位，用于 UI 展示
-    scopes TEXT[] NOT NULL DEFAULT '{kb:read,chat:read}',
-    last_used_at TIMESTAMPTZ, expires_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE audit_log (
-    id BIGSERIAL PRIMARY KEY,
-    api_key_id BIGINT REFERENCES api_keys(id), user_id BIGINT REFERENCES users(id),
-    action TEXT NOT NULL,       -- search | ask | mcp_call | a2a_call | upload ...
-    kb_ids BIGINT[],            -- 审计三元组：key → user → kb
-    detail JSONB,               -- query 摘要、结果数、耗时
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX audit_user_time ON audit_log (user_id, created_at DESC);
-CREATE INDEX audit_time ON audit_log (created_at DESC);
-```
-
-明文 API Key **只在创建时返回一次**。吊销是**删行**，没有 `revoked_at` 列。
-
-### 2.8 外部 LLM 配置
-
-```sql
-CREATE TABLE llm_settings (
-    id INT PRIMARY KEY DEFAULT 1,        -- 全局单例
-    provider TEXT NOT NULL DEFAULT 'extractive'
-             CHECK (provider IN ('extractive','openai_compat')),
-    base_url TEXT, model TEXT,
-    api_key TEXT,                        -- 明文（必须能发给上游）；读端点只回掩码
-    extra_headers JSONB NOT NULL DEFAULT '{}'::jsonb,
-    temperature REAL NOT NULL DEFAULT 0.3,
-    enabled BOOLEAN NOT NULL DEFAULT FALSE,
-    use_for_ask BOOLEAN NOT NULL DEFAULT TRUE,
-    use_for_contextual BOOLEAN NOT NULL DEFAULT TRUE,
-    updated_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-```
-
-> **没有行 = 抽取式**（零外传），这正是隐私默认。迁移不插默认行。只有 `provider='openai_compat'` **且** `enabled` **且** base_url/model/api_key 齐全，生成层才真的外传。
->
-> `extra_headers` 是接特殊网关的硬需求（例如某些 OpenAI 兼容网关要求自定义请求头，缺它 400）。
-
-### 2.9 索引模型记录
-
-```sql
-CREATE TABLE index_models (
-    collection    TEXT PRIMARY KEY,     -- kb_dense / kb_visual
-    model         TEXT NOT NULL,
-    dim           INT  NOT NULL,
-    model_version TEXT,
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-```
-
-> **为什么需要它**：索引与查询必须同模型，否则在两个向量空间里算相似度，排序基础整个失效且**不报错**。入库 / 重建时写、dense 腿查询前校验（不一致就 `skipped`）、`/health` 的 `index_models` 如实汇报。稀疏腿（BM25）是词法算法，不记录。
-
-### 2.10 会话、聊天与语料统计
-
-| 表 | 用途 | 关键点 |
+| 组 | 表 | 关键约束 |
 |---|---|---|
-| `chat_sessions` | 多轮会话 | 新增 `kb_ids`（检索范围，`null` = 全部有权限的库），`kb_id` 可空 |
-| `chat_messages` | 消息历史 | 只存引用编号，不存来源身份 ⇒ 历史 `[n]` 点不出原文 |
-| `chat_day_stats` | 聊天时间线的按天汇总 | 聊天 KB 的时间线视图 |
-| `terms` / `corpus_stats` | BM25 词表与语料统计 | **全局量**；入库时加、删除时减，必须有统一减法入口 |
+| 身份与工作区 | `users`、`workspaces`、`workspace_members`、`workspace_invites` | `users.role` 只有 `user` / `superadmin`；`workspace_members.role` 只有 `owner` / `member`，两者不是一回事 |
+| 知识库与文档 | `knowledge_bases`、`documents`、`blobs`、`chunks` | `visibility` 三档；`source_kind` 三档；`chunk_strategy` 六档；`documents.status` 七档 |
+| 任务与索引统计 | `jobs`、`terms`、`corpus_stats`、`index_models` | `jobs.kind` 八档；`terms` 与 `corpus_stats` 是**全局量**，不分租户 |
+| 认证与审计 | `api_keys`、`audit_log` | 只存 Key 的完整 sha256；审计外键是 `SET NULL`，主体注销后记录仍在 |
+| 会话与配置 | `chat_sessions`、`chat_messages`、`chat_day_stats`、`llm_settings` | 会话是个人私产；`llm_settings` 是单例（`id` 恒为 1） |
 
----
+表结构用 `Mapped[...]` 声明，没有用数据库 ENUM，而是 `TEXT + CHECK`。原因是 alembic autogenerate 不检测 ENUM 或 CHECK 的值变更，用 TEXT 至少能让人看见差异。改任何枚举都要同步三处：模型里的 CHECK、`services/common/jobs.py` 的 `ALL_KINDS` 或对应常量、`services/worker/handlers/__init__.py` 的 `HANDLERS`，再加一条手写迁移。
 
-## 3. Qdrant 索引布局
+几个默认值直接决定了检索行为：`knowledge_bases.chunk_size` 默认 500、`chunk_overlap` 默认 50、`chunk_strategy` 默认 `recursive`；`embed_model` 由全局配置写入，不能按库改；`pii_mask` 与 `generate_image_desc` 默认关闭；`rerank_model` 为 `NULL` 表示不启用精排。`llm_settings.temperature` 默认 0.3，`enabled` 默认 `false`。
 
-### 3.1 三个 collection 而不是一个
+`workspace_invites` 只存 HMAC-SHA256 哈希与前 4 位前缀，不存明文；`role` 只能是 `member`；`used <= max_uses` 由数据库 CHECK 兜住并发兑换。
 
-Qdrant 的单个 collection **不支持混合 unnamed + named multi-vector**，而 `kb_visual` 用的是命名向量 `text` + `multivector_config`。
+## documents 的版本与状态字段怎么读？
 
-| collection | 向量类型 | 模型 | 承载 |
+同一份 `(kb_id, file_name)` 可以有多行，靠两个字段回答两个不同的问题：
+
+- `is_current` 回答“哪一版参与检索”。检索只返回 `is_current=true AND deleted_at IS NULL`。
+- `version_id` 回答“这是第几版”，从 1 起，每次同名覆盖 +1。它不提供完整历史，只提供版本号。
+
+覆盖式更新时，旧版本被 `supersede`：`is_current=false`、`deleted_at` 置为当前时间、30 天后物理清理。新版本沿用同一个 `file_name`，内容哈希不同。
+
+另外几个容易记错的字段：
+
+| 字段 | 含义 | 注意 |
+|---|---|---|
+| `quality` | 三层校验报告与切分策略 note | `NULL` = 加这一列之前摄取的；`{}` = 跑了、无问题 |
+| `scan_pages` | 哪些页要走视觉腿 | 视觉腿对账在 PG 侧的**唯一**真相来源；`NULL` = 未知，对账必须跳过 |
+| `pii_hits` | 掩码**前**的 PII 计数 | 开了掩码后仍能回答“原文里有多少” |
+| `taken_at` | 照片的事件日期 | 只从 EXIF 或文件名抽，抽不到留空，**不猜** |
+| `uploaded_by` / `created_by` | 上传者 / 创建者 | 可空，外键 `SET NULL`，用户注销后资源仍能保留 |
+
+文档状态有 7 档：`pending`、`parsing`、`chunking`、`embedding`、`ready`、`failed`、`deleted`。前四档是中间态，后三档是终态。任务状态与文档状态是两份状态，终态判定见[任务与运维](jobs-operations.md)。
+
+## chunk 上为什么要存坐标和表格网格？
+
+`chunks.content_norm` 是归一化文本，用于嵌入；`locations` 是 L3 引用坐标，形状为 `[{page, bbox, row?, col?}]`，`bbox` 已归一化到 0~1。
+
+实测坐标往返误差为 `0.00e+00` point，与 DPI 无关；正文 chunk 恰好 1 个框；表格 chunk 每个非空单元格 1 个框，实测最多 40 个，带 `row` / `col`；抽取成本 8~9 ms/页。
+
+表格除了 Markdown 文本，还落一份 `table_json`（`{header, rows, row_count, col_count}`）供前端渲染真表格，并在文本前加一句纯规则生成的描述（“N 行 × M 列；表头：…”）让“一览表”类查询能召回。父块上下文存 `parent_text`，章节路径存 `section_path`，两者都不进向量库，只随结果回传。
+
+`chunks.content_norm` 上有一个 `gin_trgm_ops` 索引，但它只服务 `LIKE` / `similarity`；真正召回用的 `word_similarity` 用不上这个索引，走顺序扫描。这是刻意的取舍：换回 `ILIKE` 会静默漏召回。
+
+画框时有两个必须遵守的约定：归一化坐标要乘回**当前渲染页图**的像素尺寸；表格框只能从 `tbl.rows[i].cells` 取，不能从扁平的 `tbl.cells` 取，否则合并单元格会让框错位。
+
+## Qdrant 三集合与稳定点 ID
+
+三个集合的向量形态不同，不能合并：
+
+| 集合 | 向量 | 模型或算法 | 承载 |
 |---|---|---|---|
-| `kb_dense` | dense 512d | bge-small-zh-v1.5 | 所有文本 chunk |
-| `kb_sparse` | sparse | jieba BM25 | 同上，词元级精确 |
-| `kb_visual` | multi 128d max_sim | colSmol-500M | 扫描件页 + 照片 |
+| `kb_dense` | 匿名稠密 512 维，Cosine | `bge-small-zh-v1.5` | 所有文本 chunk |
+| `kb_sparse` | 顶层 `sparse_vectors` 里的 `bm25` | jieba + 自实现 BM25 | 文本 chunk 的词元级匹配 |
+| `kb_visual` | 命名向量 `text`，128 维，`max_sim` 多向量 | `colSmol-500M` | 扫描页与照片 |
 
-三者的**点 ID 完全一致**（同一 chunk 同时有 dense 和 sparse），检索时并行查再 RRF 融合。一致性靠的就是“点 ID 由业务键算出来”；若退化成全局连续序号，三条腿就对不上了。
-
-### 3.2 稳定点 ID
+同一 chunk 在 dense 与 sparse 里的点 ID 必须相同，RRF 才能把它们合并。ID 由业务键直接算出来：
 
 ```python
 def point_id(kb_id: int, doc_id: int, chunk_index: int) -> int:
-    """blake2b-64 哈希，稳定可复算，删后可重建设不冲突"""
-    h = hashlib.blake2b(f"{kb_id}\x00{doc_id}\x00{chunk_index}".encode(), digest_size=8)
-    return int.from_bytes(h.digest(), "big") >> 1   # 留出符号位
+    raw = f"{kb_id}\x00{doc_id}\x00{chunk_index}".encode()
+    return int.from_bytes(hashlib.blake2b(raw, digest_size=8).digest(), "big") >> 1
 ```
 
-页级另有 `point_id_for_page(kb_id, doc_id, page_no)`（`kb_visual` 用的就是它，`chunk_index = -(page_no+1)`）。实测 10 万 chunk **0 冲突**。
+右移一位是为了避开 uint64 的最高位，兼容 Qdrant。页级点用 `point_id_for_page(kb_id, doc_id, page_no)`，实际是 `chunk_index = -(page_no + 1)`，与 chunk 级点落在不同空间。实测 10 万 chunk 零冲突。
 
-**推论**：重建索引后同文档同 chunk 的 ID 不变 ⇒ 支持“临时删掉索引再用同一脚本重建”。
+用哈希而不是自增序号有两层收益：删掉索引后可以按同样规则重建出同样的 ID；trgm 腿没有 Qdrant 点，但能从 `(kb_id, doc_id, chunk_index)` 复算出同一个 ID，于是非向量存储的命中也能和向量腿融合。
 
-### 3.3 Payload schema
+三集合的 payload 形状一致：`kb_id`、`doc_id`、`chunk_index`、`workspace_id`、`visibility`、`source_kind`、`owner_id`、`file_name`、`mime`、`kind`、`page`、`embed_model`、`text_norm`、`text_raw`，以及可选的 `locations`、`table_index`、`parent_text`、`section_path`、`updated_at`。必须建索引的字段是 `kb_id`、`workspace_id`、`doc_id`、`source_kind`、`visibility`、`updated_at` 六个。
 
-三个 collection **统一 payload**（便于 RRF 融合时对齐）：
+**只有 `kb_id` 参与租户过滤。** 其余字段随结果回传，供审计、展示与时间过滤。尤其 `visibility` 是摄取时写死的，改库可见性不会回写；一旦有人按它过滤，陈旧值会立刻变成越权。守卫在 `tests/test_qdrant_filter_scope.py`。
 
-`kb_id` / `doc_id` / `chunk_index` / `source_kind` / `owner_id` / `workspace_id` / `visibility` / `kind` / `page` / `embed_model` / `text_norm` / `text_raw` / `file_name` / `mime` / `locations`（+ `table_index` / `parent_text` / `section_path` / `updated_at`）。
+## 删除一条文档要经过哪六步？
 
-必须建的 payload 索引（各 collection 共 6 个）：
+![删除链的六步：减 df、删三条腿的点、删文档行、blob 引用计数减一、归零才删文件，审计保留](diagrams/delete-chain.svg)
 
-- `kb_id`（keyword，最高优先级）
-- `workspace_id`（keyword）
-- `doc_id`（integer）
-- `source_kind`（keyword）
-- `visibility`（keyword）
-- `updated_at`（datetime，时间过滤）
+软删除只改 PG 的两列：`deleted_at` 与 `is_current=false`，此刻对检索立即生效。物理删除由 30 天后的 `cleanup` 任务或手工清空回收站触发，顺序固定：
 
-> ⚠️ `payload_schema` 在 GET 响应的**顶层**；建索引要 `?wait=true`。
+1. 把该文档 chunk 的词从 BM25 词表减回去（`terms.df` 与 `corpus_stats`）；
+2. 删 Qdrant 三个集合里该文档的点；
+3. 删 `documents` 行，`chunks` 与 `jobs` 靠 `ON DELETE CASCADE` 跟着走；
+4. `blobs.ref_count` 减一；
+5. 归零才物理删 blob 文件；
+6. 审计日志**不删**，保留 180 天。
 
-### 3.4 别名模式与蓝绿重建
+这条链只在 `services/ingest/purge.py` 实现一次，worker 的 `KIND_CLEANUP` 与 `DELETE /api/v1/trash` 共用。漏掉第 1 步的症状不是报错，而是 idf 被压平、检索质量悄悄变差；漏掉第 2 步则已删内容还能被召回。
 
-逻辑名（`kb_dense` / `kb_sparse` / `kb_visual`）在**别名模式**下是别名，真正存数据的是带代次后缀的物理集合。
+库与工作区的物理清理也走这里，但只删容器行；它们下面的文档必须先被 `purge_documents` 收走。顺序反了，文档的 df 就永远减不回去。
 
-| 模式 | 开关 | `kb_dense` 是 | 蓝绿重建 |
-|---|---|---|---|
-| 默认 | `QDRANT_ALIASES=false` | 真实集合（历史行为逐字不变） | ❌ |
-| 别名 | `QDRANT_ALIASES=true` | 别名 → `kb_dense__<gen>` | ✅ |
+## 对账与重建：漂移怎么发现、怎么修？
 
-```bash
-# 一次性迁移（把现有真实集合复制成物理集合 + 别名）
-uv run python deploy/bootstrap_index_aliases.py --yes
-
-# 蓝绿重建（超管；建影子 → 验证 → 原子切别名 → 留旧回滚）
-curl -XPOST '/api/v1/admin/reindex?swap=true' -H "Authorization: Bearer <超管 key>"
-```
-
-> ⚠️ 别名**不出现在 `GET /collections`**（实测）⇒ 巡检 / `/health` 列的是物理名；对账用逻辑名经别名查询，照常。
->
-> ⚠️ 迁移与切换都有毫秒级窗口（删原集合 → 建别名），期间该腿读 404 ⇒ 检索**降级 `skipped`**，不 500。
->
-> ⚠️ 视觉腿**不重建**：它要重读原件 + colSmol 前向，那是“重新摄取”。影子重建只覆盖 dense + sparse。
-
----
-
-## 4. 级联删除与一致性
-
-**一致性原则**：PostgreSQL 是真相源，Qdrant 是可重建派生索引。
-
-```
-删除文档：
-  1. PG: documents.deleted_at = now(), is_current = FALSE   ← 真相源，此刻生效
-  2. 删 blob（仅当 ref_count 归零）
-  3. 入队 cleanup 任务 → 删 Qdrant 三 collection 的对应点
-  4. 30 天后（cleanup）物理清理文档行 + chunk 行
-```
-
-**允许 Qdrant 短暂不一致**（检索时以 PG 的 `is_current` 为准二次过滤）。**绝不允许 PostgreSQL 有而 Qdrant 无**（那才是真丢失）。
-
-索引对账任务在 worker 空闲时定期跑（`common/consistency.py`，只报告不自动修），另有：
-
-- `GET /admin/consistency`（按需）；
-- `deploy/monitor.py`（要人跑）。
-
-对账按腿分别报告：
+Qdrant 与 PG 允许短暂不一致，但“短暂”要有地方看。对账的判据在 `services/common/consistency.py`，按腿分别比较：
 
 | 报告项 | 含义 | 该做什么 |
 |---|---|---|
-| `legs.*.missing` | PG 有、这条腿没有 | 漏索引 → 文本腿 `KIND_REINDEX` **能**修；视觉腿要 `reparse` |
-| `legs.*.dangling` | 这条腿有、PG 没有 | 残留点 → reindex **修不了**，要重跑摄取或软删 |
+| `missing` | PG 有、这条腿没有 | 文本腿跑 `KIND_REINDEX` 能补；视觉腿要 `reparse` |
+| `dangling` | 这条腿有、PG 没有 | 残留点；`reindex` 会清孤儿库，单文档残留要重跑摄取 |
 
-> 顶层汇总口径会掩盖“只有一条腿坏了”——**不要只看顶层**。
+`GET /admin/consistency` 返回具体 id，不是布尔值；worker 空闲时每 900 秒跑一次并只记日志；`deploy/monitor.py` 分三条腿各报一项。顶层汇总只覆盖文本腿，会掩盖“只有视觉腿坏了”。
 
----
+重建有两条路：
 
-## 5. 迁移与真实数据
+- 默认：按库先删后建，正在重建的那个库短暂搜不到，其它库照常；
+- 蓝绿：`QDRANT_ALIASES=true` 时逻辑名是别名，`POST /admin/reindex?swap=true` 先建影子集合、灌数据、验点数，再原子切别名，旧集合保留回滚。
 
-迁移原则：**保留原始数据源，向量全部重建**。原始文件在 `data/`，可以重跑：
+视觉腿**不参与重建**。它要重读原件并跑 colSmol 前向，那是重新摄取，不是重建索引。重建时把 `kb_visual` 一起删掉会变成“删了建不回来”，比漂移更糟。
 
-- `data/chat_messages_clean.jsonl` → KB「聊天记录」（`source_kind=chat`）；
-- `data/docs_light/*.md` → KB「我的文档」（需重跑 privacy 判定）；
-- `photos_original/*.jpg` → KB「我的照片」。
+## 备份恢复与可重建边界
 
-**隐私复检**：迁移时必须重跑 `owner_classifier`，不能信任旧结果——判定规则被后续修复改动过多次。
+Qdrant 不备份，因为它可以从 PG 的 chunk 重建；备份只需保证 PostgreSQL 与 blobs 完整。`deploy/backup.sh` 用 `pg_dump -Fc` 导库，打包 blobs，并在 manifest 里记下每张表的行数、每个 blob 的 sha256 以及每个 collection 的期望点数。
 
-> `data/` 不进 git；已跟踪文件里不许有真实信息。守卫在 `tests/test_no_real_data.py`：真实数据只从**不被追踪**的文件读（`eval/_qset.py` / `eval/_local_data.py` / 本地 denylist / `reports/`）。
+`deploy/restore.sh --scratch` 把备份恢复到一个临时库，逐表比行数、逐个比 blob 的 sha256，对完再删掉临时库。恢复后必须重建索引，重建出的点数应等于 manifest 里的 `qdrant_expect`，那才是“索引可重建”的验收方式。
 
----
+`data/` 不进 git；已跟踪文件里不许出现真实信息。守卫在 `tests/test_no_real_data.py`：真实问题集与探针数据只从被 gitignore 的文件读取。
 
-## 6. 相关文档
+## 相关文档
 
-- 各表如何被使用：[文档处理与切分](./ingestion.md) · [任务队列与进程模型](./jobs.md)
-- 过滤条件与审计：[多租户与权限](./tenancy.md)
-- 备份与恢复：[部署与运维](./operations.md)
+- 数据如何写入：[文档摄取](ingestion.md) 与[任务、进程与运维](jobs-operations.md)
+- 过滤条件与审计：[多租户与权限](tenancy.md)
+- 全局图景：[架构](architecture.md)

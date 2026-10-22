@@ -1,225 +1,129 @@
-# 架构总览
+# 架构：三个进程、两个存储
 
-> 面向：第一次接手这套代码、想先建立全局图景的人。本文讲**为什么这样切分**，不逐条罗列目录。
+Knowledge Hub 把办公文档、聊天导出和照片收进不同的知识库，解析、切分、嵌入之后提供带引用的检索与问答。它面向一台机器自部署，不追求多节点，也没有把每个模块拆成独立服务。
 
----
+系统里只有三个应用进程，加两个存储：
 
-## 1. 三个进程 + 两个存储
+![三个应用进程与两个存储：API 负责请求与检索编排，worker 轮询任务，visual_service 只做视觉编码；PostgreSQL 是真相源，Qdrant 是派生索引](diagrams/architecture-processes.svg)
 
-系统全部跑在一台机器上。单机自部署是明确目标，不是权宜之计。
-
-```
-                      ┌──────────────────────────────────────┐
-   浏览器 / 客户端 ───▶│ api（FastAPI） :8010                  │──▶ Qdrant   :6333
-                      │  · 检索编排（四条腿）                  │──▶ PostgreSQL :5432
-                      │  · 托管前端静态产物                    │
-                      │  · MCP /mcp · A2A /a2a                │
-                      └───────┬──────────────────────────────┘
-                              │ 入队任务 / 查询进度
-                              ▼
-                      ┌──────────────────────────────────────┐
-                      │ worker（无监听端口）                   │
-                      │  · 轮询任务队列 · 摄取 · 清理          │
-                      │  · 可选的视觉写入（本地或走服务）       │
-                      └──────────────────────────────────────┘
-
-                      ┌──────────────────────────────────────┐
-                      │ visual_service :8020                  │
-                      │  · 常驻视觉编码模型，启动即预热         │
-                      │  · POST /encode（文本）· /encode_image │
-                      │  · 不查 Qdrant、不做租户过滤            │
-                      └──────────────────────────────────────┘
-```
-
-| 进程 | 监听 | 职责 | 常驻内存 |
+| 进程 | 入口 | 监听 | 职责 |
 |---|---|---|---|
-| `api` | 8010 | REST / SSE / MCP / A2A、托管前端、检索编排 | ~400 MB，峰值 ~600 MB |
-| `worker` | 无 | 领取任务、解析/切分/嵌入/清理/导入 | ~200 MB；本地视觉编码时峰值 ~2.8 GB |
-| `visual_service` | 8020 | 只做「文本/图片 → 向量」 | 2.71 GB（启动即预热） |
+| `api` | `services/api/main.py` | `8010` | REST 与 SSE、MCP `/mcp`、A2A `/a2a/tasks`、托管前端构建产物、检索编排 |
+| `worker` | `services/worker/main.py` | 无 | 轮询 `jobs` 表，执行摄取、视觉编码、缩略图、预览转换、清理、导入与重建 |
+| `visual_service` | `services/visual_service/main.py` | `8020`，只绑 `127.0.0.1` | 把查询文本或一页图编码成 colSmol 多向量 |
 
-PostgreSQL 是唯一真相源；Qdrant 是可重建的派生索引；原件存本地内容寻址 blob。
+PostgreSQL 带 pgvector 与 pg_trgm，跑在 `pgvector/pgvector:pg16` 容器里，端口 `5432`；Qdrant 是 `qdrant/qdrant:v1.15.1`，端口 `6333`（REST）与 `6334`（gRPC）。两个存储都只监听回环地址。前端开发服务器另占 `5173`，生产构建产物由 API 进程直接托管。
 
----
+## 为什么视觉编码要单独一个进程？
 
-## 2. 为什么把视觉编码模型单独拆一个进程
-
-视觉模型（`colSmol-500M`）在 CPU 上的实测特性决定了进程边界：
+`colSmol-500M` 在 CPU 上的成本决定了这条进程边界：
 
 | 指标 | 实测值 |
 |---|---|
-| 模型加载 | 12.8 ~ 15.0 s，常驻 RSS **+2.64 GB** |
-| 单图编码 | 常数 **≈15 s/图**（float32），降分辨率 / 降 DPI 完全无效 |
-| 查询文本编码 | 119 ~ 128 ms/条（p95 157 ms） |
-| 6 路并发 | 墙钟 0.96 s，消耗 CPU 8.36 s ⇒ **并行度 8.7×** |
+| 模型加载 | 12.8 ~ 15.0 s，常驻内存 +2.64 GB |
+| 单张图编码 | 约 15 s，且与图片分辨率无关 |
+| 查询文本编码 | 119 ~ 128 ms/条，p95 157 ms |
+| 6 路并发 | 墙钟 0.96 s，消耗 CPU 8.36 s，并行度约 8.7 倍 |
 
-最后一行是拆进程的根本理由：**如果它和 API 同进程**，用户在文档处理期间提问会把所有核占满、API 长时间无响应。所以有一条硬约束：
+如果它和 API 同进程，用户在文档处理期间提问，编码会把核占满，API 长时间没有响应；2C4G 的机器还会直接 OOM。因此有一条硬约束：**API 进程不得加载视觉编码模型**。`services/retrieval/pool.py` 里的 `get_visual_model()` 在未显式调用 `enable_visual(True)` 的进程里会主动抛错，而不是悄悄退化成空向量。
 
-> **API 进程不得加载视觉编码模型。** `pool.get_visual_model()` 在未显式启用它的进程里会主动抛错。
+代价是 API 自己用不了视觉腿。解决办法不是放宽约束，而是增加第三个进程承担**读侧**编码：API 通过 HTTP 调 `visual_service` 拿查询向量。
 
-代价随之而来：API 进程自己就用不上视觉腿。解法不是放宽约束，而是**加第三个进程承担读侧编码**：API 通过 HTTP 调 `visual_service` 拿查询向量，Qdrant 查询与租户过滤仍留在 API 侧。
-
-### 2.1 那条线为什么刻意断开
-
-`visual_service` 只做“文本/图片 → 向量”，**它不连 Qdrant，也不做任何租户判定**。租户过滤的构造入口全仓库只有一处（`services/common/auth.py`），复制进第三个进程就多了一份迟早会漂移的实现，而漂移的方向是**越权**。
-
-视觉腿的查询因此被拆成三步，只有第一步可能跑在远端：
+这条线是刻意断开的。`visual_service` 只做编码，**不连 Qdrant，也不做租户判定**。租户过滤的入口只有 `services/common/auth.py`，复制进新进程就多了一份迟早漂移的实现，而漂移的方向是越权。视觉腿的查询因此分成三步：
 
 | 步骤 | 在哪跑 | 理由 |
 |---|---|---|
-| ① 查询文本 → 多向量编码 | 本进程或远端 `visual_service` | 只有这步需要重模型 |
-| ② 构造租户过滤条件 | **始终在 API 进程** | 过滤唯一入口，不能复制 |
-| ③ Qdrant MaxSim 查询 | **始终在 API 进程** | 同上 |
+| 查询文本 → 多向量 | 本进程或远端 `visual_service` | 只有这步需要重模型 |
+| 构造租户过滤条件 | 始终在 API 进程 | 过滤唯一入口，不能复制 |
+| Qdrant MaxSim 查询 | 始终在 API 进程 | 同上 |
 
-守卫在 `tests/test_visual_service.py`：视觉服务不得出现 Qdrant 或 auth 相关代码。
+守卫在 `tests/test_visual_service.py`：视觉服务里不得出现 Qdrant 或 auth 相关代码。
 
-### 2.2 内存预算（单机 15 GB 的取舍）
+写侧默认仍由 worker 本地编码。多 worker 部署可以打开 `VISUAL_WRITE_VIA_SERVICE=true`，让 worker 调同一个常驻服务，这样每个 worker 不再各占 2.65 GB；代价是摄取从此依赖视觉服务可用。
+
+单机 15 GB 内存下的实测预算大致是这样：
 
 | 进程 | 常驻 | 峰值 |
 |---|---|---|
-| api | ~400 MB | ~600 MB |
-| worker | ~200 MB（未编码） | **~2.8 GB**（加载视觉模型后） |
-| visual_service | **2.71 GB** | ~2.8 GB |
-| postgres | ~200 MB | ~500 MB |
-| qdrant | ~300 MB | ~800 MB |
+| `api` | 约 400 MB | 约 600 MB |
+| `worker` | 约 200 MB（未编码） | 约 2.8 GB（本地加载视觉模型后） |
+| `visual_service` | 2.71 GB | 约 2.8 GB |
+| PostgreSQL | 约 200 MB | 约 500 MB |
+| Qdrant | 约 300 MB | 约 800 MB |
 
-worker 与 `visual_service` **各自**要 ~2.65 GB，同机峰值约 6 GB。15 GB 够，但 2C4G 的小机器上必须二选一。
+worker 与 `visual_service` 各自要 2.65 GB，同机峰值约 6 GB。15 GB 够用，但 2C4G 的小机器上必须二选一。走远端写侧时 worker 实测回落到约 991 MB。
 
-可选形态：把**写侧**也改成走 `visual_service`（`VISUAL_WRITE_VIA_SERVICE=true`），worker 不再自己加载模型（实测 RSS 降到 ~991 MB），于是同机能跑 N 个 worker 而不把 2.65 GB 乘以 N。代价是摄取从此**依赖该服务可用**，默认关闭。
+## 一次上传要经过哪些步骤？
 
----
+![上传与摄取链路：同步校验后落 blob 与 documents 行，worker 解析、切分、校验、嵌入，再派生视觉与预览任务](diagrams/ingest-pipeline.svg)
 
-## 3. 数据流
+上传端点先做能在请求里判定的检查：扩展名白名单、单文件不超过 50 MB、单请求不超过 20 个文件、文件头与扩展名是否明显不符。通过后按内容哈希落盘，登记 blob 引用计数，写一条 `documents` 行（`status=pending`），再入队一个 `ingest` 任务。
 
-### 3.1 上传 → 可检索
+worker 用 `FOR UPDATE SKIP LOCKED` 领取任务，然后在 `services/ingest/pipeline.py` 里走完解析、切分、校验、嵌入和写索引。有文本层的文档在文本腿写完后置 `ready`；扫描页和照片会派生 `embed_visual` 任务，每页一个。纯扫描件与照片没有文本腿，会停在 `pending`，等这些任务全部到达终态后，再由 `services/worker/doc_state.py` 按页级点数决定 `ready` 还是 `failed`；有文本层的混合 PDF 不会因为视觉页还没齐而回退状态。细节见[文档摄取](ingestion.md)。
 
-```
-文件
-  → ① 上传（同步校验：扩展名白名单 · ≤50MB · 文件头嗅探）
-  → ② blob 按 sha256 落盘（内容寻址，同一份只存一次）
-  → ③ documents 行（status=pending）+ 入队 ingest 任务
-  → ④ worker 领取任务（FOR UPDATE SKIP LOCKED）
-  → ⑤ 解析（PDF / Office / 文本 / 图片）
-  → ⑥ 切分策略（六选一，默认 recursive；失败退回默认并记 note）
-  → ⑦ 分层校验：格式嗅探 → 解析体检 → 切分体检
-  → ⑧ PII 检出（按库决定是否掩码；只掩索引侧）
-  → ⑨ 文本嵌入（512 维）+ BM25 稀疏向量 + 写 PG chunks 行
-  → ⑩ 扫描页 / 照片页入队 embed_visual → 多向量写 kb_visual
-  → ⑪ 终态结算：任务全部终态 且 索引里实际有多少点 ⇒ 才置 ready
-```
+## 一次检索要经过哪些步骤？
 
-第 ⑪ 步值得单说：`jobs.status` 与 `documents.status` 是**两份**状态。只看任务状态，部分失败会被报成 `ready`；只看索引点数，全失败时文档会永远停在 `pending`。所以判定要同时看两件事，且结算在任务收尾的**事务之外、且不抛异常**。
+![检索链路：四条腿各自召回，RRF 只按排名融合，再经过软删过滤、查询路由偏好与可选精排，最后组装证据](diagrams/retrieval-flow.svg)
 
-### 3.2 一次检索
+请求先经过 API Key 鉴权，得到 `UserContext.readable_kb_ids`。查询路由判断意图（照片、扫描件、表格、聊天、日期），置信度低于 0.35 就不路由。随后四条腿并发召回：
 
-```
-客户端
-  → auth：API Key → UserContext(readable_kb_ids)      ← 租户过滤唯一来源
-  → routing：判查询意图（photo / scan / table / chat / date / general）
-             └ 置信度低于 0.35 ⇒ 不路由（等权 + 不过滤）
-  → engine：跑四条腿
-       dense   → 编码查询 → Qdrant
-       sparse  → 查 PG 词表算 BM25 权重 → Qdrant
-       trgm    → PostgreSQL word_similarity
-       visual  → ① 编码（本地或远端）② 构造过滤 ③ MaxSim
-                 任何一步失败 ⇒ 该腿 skipped + 可操作原因，不阻塞其它腿
-  → fusion：RRF 融合（只用排名，不用分数）→ 取 top_k × 3 候选进池
-  → 软删除二次过滤（PG 已删但索引还在的点必须挡掉）
-  → routing.prefer：按意图做软偏好过滤（过滤后为空自动退回全部）
-  → rerank：仅当该知识库配了精排模型时跑（跨库检索一律不跑）
-  → ask：组装证据 → 生成（默认抽取式）→ 引用可核验（块级 + 页面级坐标）
-```
+- `dense`：`bge-small-zh-v1.5` 编码查询，查 `kb_dense`；
+- `sparse`：jieba 分词后在 PostgreSQL 词表里算 BM25 权重，查 `kb_sparse`；
+- `trgm`：PostgreSQL 的 `word_similarity`，补编号、错误码这类非词字符串；
+- `visual`：查询文本编码后查 `kb_visual`，扫描页与照片靠它。
 
-关于并发要说得准确一些：**四条腿真正并发**。三条 DB 腿（dense / sparse / trgm）**各自从会话工厂拿一个会话**（各自从池里拿一条 PostgreSQL 连接，不是 HTTP 连接），视觉腿不碰 DB。早期版本的错误是让三条腿共用同一个 `AsyncSession` —— SQLAlchemy 不允许并发 `execute`，sparse/trgm 会被记成 `skipped`，`hybrid` 静默退化成 dense 单腿。改成独立会话后并发回来了，代价从"延迟"换成"连接数"：一次 `hybrid` 最多占 **请求会话 + 3 条腿 = 4 条连接**，连接池要按 `并发检索数 × 4` 估。
+融合用 RRF，只使用每条腿里的排名，不使用分数。融合后先挡掉 PG 里已软删或非当前版的文档，再按路由做软偏好过滤，最后按知识库配置决定是否精排。问答则在检索之后组装证据、流式生成并校验引用。细节见[检索与问答](retrieval.md)。
 
----
+并发这里要说得准确：四条腿是真并发。三条 DB 腿各自从会话工厂拿一个 `AsyncSession`，各自占一条 PostgreSQL 连接；视觉腿不碰 DB。早期版本让三条腿共用调用方的 `AsyncSession`，SQLAlchemy 不允许并发 `execute`，sparse 与 trgm 会被记成 `skipped`，`hybrid` 静默退化成 dense 单腿。改成独立会话后并发回来了，代价从延迟换成连接数：一次 `hybrid` 最多占“请求会话 + 3 条腿 = 4 条连接”，连接池要按“并发检索数 × 4”估。
 
-## 4. 存储分工
+## 数据到底以哪份为准？
 
-### 4.1 真相源与派生索引
+**PostgreSQL 是唯一真相源，Qdrant 是可重建的派生索引。** 由此得到一条贯穿全系统的原则：
 
-一条一致性原则贯穿全系统：
+> 允许 Qdrant 与 PostgreSQL 短暂不一致；绝不允许“PostgreSQL 里有而 Qdrant 里没有”。
 
-> **允许 Qdrant 短暂不一致；绝不允许“PostgreSQL 里有而 Qdrant 里没有”。**
+删除文档时先改 PG（`deleted_at` 与 `is_current=false`），此刻对检索立即生效；Qdrant 里的点由后台任务清理。检索在融合后还会用 PG 再过滤一次，所以即使清理任务没跑完，被删内容也不会被召回。30 天后才做物理删除，删除链有六步，漏掉任何一步都不会报错。
 
-删除文档的顺序：
+原件放在内容寻址目录 `data/blobs/{sha 前两位}/{sha}/original`，同一份文件只存一次。预览 PDF 与缩略图也放在同一个目录下。Qdrant 不参与备份，因为它可以从 PG 的 chunk 重建；备份只需要保证 PG 与 blobs 完整。表结构与删除顺序见[数据模型与一致性](data-model.md)。
 
-1. 改 PG（`deleted_at` + `is_current=FALSE`，此刻立即生效）；
-2. 删 blob（仅当引用计数归零）；
-3. 入队清理任务删索引点；
-4. 30 天后物理清理行。
+## Qdrant 为什么是三个集合？
 
-检索时以 PG 的 `is_current` 为准**二次过滤**，因此即使清理任务还没跑完，被删文档也不会被召回。
+Qdrant 的单个集合不支持“匿名向量 + 命名多向量”混用，而三种表示形态本来就不同：
 
-### 4.2 为什么是三个 Qdrant 集合而不是一个
-
-Qdrant 的单个集合**不支持“匿名向量 + 命名多向量”混用**，而三种表示形态本来就不同：
-
-| 集合 | 向量形态 | 模型 / 算法 | 承载 |
+| 集合 | 向量形态 | 模型或算法 | 承载 |
 |---|---|---|---|
-| `kb_dense` | dense 512 维 | `bge-small-zh-v1.5` | 所有文本 chunk |
-| `kb_sparse` | 稀疏（顶层 `sparse_vectors`） | jieba + 自实现 BM25 | 文本 chunk 的词元级精确 |
-| `kb_visual` | 命名向量 + multi-vector 128 维 `max_sim` | `colSmol-500M` | 扫描件页 + 照片 |
+| `kb_dense` | 匿名稠密 512 维，Cosine | `bge-small-zh-v1.5` | 所有文本 chunk |
+| `kb_sparse` | 顶层 `sparse_vectors` 里的 `bm25` | jieba + 自实现 BM25 | 文本 chunk 的词元级匹配 |
+| `kb_visual` | 命名向量 `text`，128 维，`max_sim` 多向量 | `colSmol-500M` | 扫描页与照片 |
 
-三个集合的**点 ID 完全一致**（页级用负的块序号避开冲突），由 `(kb_id, doc_id, chunk_index)` 经 blake2b-64 哈希算出。用哈希而不是自增序号，是为了能从业务键直接算出点 ID、不需要先查库——这是“删掉索引再用同一个脚本重建，结果仍然一致”的前提。
+三个集合的 chunk 级点 ID 完全一致，由 `(kb_id, doc_id, chunk_index)` 经 blake2b-64 哈希算出；页级点把 `chunk_index` 换成负数来避开同一空间。用哈希而不是自增序号，是为了能从业务键直接算出点 ID，不必先查库——这是“删掉索引再重建，结果仍然一致”的前提。三集合的 payload 形状保持一致，融合时不需要知道一条命中来自哪条腿。
 
-payload schema 三集合保持一致，融合时不需要知道一条命中来自哪条腿。
+镜像里装了 pgvector，但向量没有放进 PostgreSQL：全局只用一个文本嵌入模型，Qdrant 是既有选型；而且 pgvector 不支持 late-interaction 多向量，与视觉腿冲突。PostgreSQL 这边承担真相源、子串检索、任务队列与审计。另一个实测结论是 PostgreSQL 内置全文分词对中文无效（整行被当成一个 token），镜像里也没有中文分词扩展，所以 BM25 留在 Qdrant，PostgreSQL 只做字符级子串搜索。
 
-### 4.3 为什么装了 pgvector 却不用它存向量
+## 为什么检索只有一套实现？
 
-镜像自带 `pg_trgm`（子串检索必需），所以顺带装了 pgvector；但向量不放 PostgreSQL：
+对外有三个入口：HTTP、MCP 和 A2A。三者的检索与问答都调用 `services/retrieval/` 的同一个入口，各自只做协议适配。
 
-- 全局统一了一个嵌入模型，且 Qdrant 是既有选型；
-- pgvector **不支持 late-interaction** 多向量，与视觉腿冲突。
+理由不是抽象的代码复用。三套检索逻辑一旦各自演化，半年后就会出现“API 搜得到、MCP 搜不到”这类不一致，而且极难排查：两边看起来都正常。MCP 的 `ask_kb` 与 A2A 的 `answer` 都复用 `services/retrieval/ask.py` 的 `prepare` 与 `stream_answer`，只是最后把 SSE 帧解析回各自的协议形状。
 
-PostgreSQL 这边的职责是真相源 + 子串检索 + 任务队列 + 审计。
+## 哪些边界是刻意留下的？
 
-> 另一个实测结论：PostgreSQL 内置全文分词对中文**完全无效**（整行被当成一个 token），且该镜像里没有中文分词扩展。所以 BM25 留在 Qdrant（jieba），PostgreSQL 只承担字符级子串搜索。
-
----
-
-## 5. 多租户与三档可见性（速览）
-
-- **唯一的租户来源是 API Key**，请求体不接受 `user_id`；
-- 三档可见性（`private` / `workspace` / `global`）必须写成三个独立分支，不能塞进一个 `IN`；
-- **无权限 ≡ 不存在**，返回同一个错误码；
-- 过滤条件有两个构造入口（Qdrant / PostgreSQL），但都只读同一份 `readable_kb_ids`。
-
-详细设计与踩坑见 [多租户与权限](./tenancy.md)。
-
----
-
-## 6. 为什么检索只有一套实现
-
-```
-web/ → services/api → services/common → services/retrieval → services/ingest
-```
-
-对外有三个入口：REST API、MCP（给 AI 客户端）、A2A（给别的 Agent）。**三者的检索与问答都调 `services/retrieval/` 的同一个入口**，各自只做协议适配。
-
-理由不是抽象的“代码复用”：三套检索逻辑一旦各自演化，半年后会出现**API 搜得到、MCP 搜不到**这类不一致，而且极难排查（两边看起来都“正常”）。
-
-这条约束由 AST 扫描钉住：运行时只有一棵依赖树，“唯一一份实现”靠扫全仓库找定义点来保证。
-
----
-
-## 7. 几个刻意的边界
-
-| 边界 | 现状 | 为什么这样取舍 |
+| 边界 | 现状 | 取舍 |
 |---|---|---|
-| 文件存储 | 只有本地磁盘 + 内容寻址 blob，没有对象存储 | 单机自部署是目标形态；blob 按 sha256 分片，同一份只存一次，引用计数归零才物理删 |
-| 原件永远保留 | PII 掩码只作用于索引侧文本，blob / 预览 / 下载始终是原文 | 个人知识库的核心用途之一是“搜我自己的证件号” |
-| 生成层默认抽取式 | 不配置外部 LLM 时答案句子全部摘自原文 | 隐私默认 + 引用 100% 可核验 |
-| 精排默认关闭 | 按知识库开启 | 只能重排候选，不能扩大召回；CPU 上 20 个候选要 0.6~1.2 s |
-| 不引入多节点 | 没有分片、没有副本 | 复杂度换不来这个规模上的收益 |
-| OCR 不做 | 扫描件交给视觉召回 | 不引入 tesseract 这条独立链路 |
-| 预览不引入 pdf.js | 底图用后端渲染的页图 | 框位与服务端同源；代价是页面不能选中文字 |
+| 文件存储 | 只有本地磁盘与内容寻址 blob | 单机自部署是目标形态；同一份文件只存一次 |
+| 原件永不被掩码 | PII 掩码只作用于索引侧文本 | 用户仍可下载、预览原文 |
+| 生成层默认抽取式 | 答案句子全部摘自原文 | 零外传，引用 100% 可核验 |
+| 精排默认关闭 | 按知识库开启 | 只能重排候选，不能扩大召回；默认 v2-m3 下 20 个候选约 2.3 s |
+| 不做 OCR | 扫描件交给视觉召回 | 不引入 tesseract 这条独立链路 |
+| 不引入 pdf.js | 底图用后端渲染的页图 | 框位与服务端同源；代价是页面不能选中文字 |
+| 不做多节点 | 没有分片与副本 | 这个规模上复杂度换不来收益 |
 
----
+五条硬约束（依赖树、租户过滤入口、检索实现、fail-closed、API Key 是唯一租户来源）见[踩坑与硬约束](pitfalls.md)。
 
-## 8. 相关文档
+## 相关文档
 
-- 摄取细节：[文档处理与切分](./ingestion.md)
-- 检索细节：[检索与融合](./retrieval.md)
-- 表结构与索引：[数据模型与存储](./data-model.md)
-- 权限与审计：[多租户与权限](./tenancy.md)
-- 任务与进程：[任务队列与进程模型](./jobs.md)
+- 文件如何变成可检索内容：[文档摄取](ingestion.md)
+- 四条腿与问答：[检索与问答](retrieval.md)
+- 表结构、删除与对账：[数据模型与一致性](data-model.md)
+- 三档可见性与审计：[多租户与权限](tenancy.md)
+- 队列、进程、巡检与备份：[任务、进程与运维](jobs-operations.md)

@@ -1,0 +1,25 @@
+<mxfile host="app.diagrams.net">
+  <diagram id="arch" name="architecture">
+    <mxGraphModel dx="1200" dy="800" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="960" pageHeight="520" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="client" value="浏览器 / 客户端" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontFamily=Noto Sans CJK SC;" vertex="1" parent="1"><mxGeometry x="40" y="60" width="130" height="60" as="geometry"/></mxCell>
+        <mxCell id="api" value="api :8010&lt;br&gt;REST / SSE / MCP / A2A&lt;br&gt;托管 web/dist" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontFamily=Noto Sans CJK SC;" vertex="1" parent="1"><mxGeometry x="250" y="40" width="230" height="100" as="geometry"/></mxCell>
+        <mxCell id="pg" value="PostgreSQL :5432&lt;br&gt;真相源&lt;br&gt;18 张表" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontFamily=Noto Sans CJK SC;" vertex="1" parent="1"><mxGeometry x="620" y="40" width="180" height="90" as="geometry"/></mxCell>
+        <mxCell id="qdrant" value="Qdrant :6333&lt;br&gt;派生索引&lt;br&gt;dense / sparse / visual" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontFamily=Noto Sans CJK SC;" vertex="1" parent="1"><mxGeometry x="620" y="160" width="180" height="90" as="geometry"/></mxCell>
+        <mxCell id="worker" value="worker（无端口）&lt;br&gt;轮询 jobs · 摄取 · 清理" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontFamily=Noto Sans CJK SC;" vertex="1" parent="1"><mxGeometry x="250" y="240" width="230" height="80" as="geometry"/></mxCell>
+        <mxCell id="visual" value="visual_service :8020&lt;br&gt;只做视觉编码&lt;br&gt;不查 Qdrant、不做租户判定" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontFamily=Noto Sans CJK SC;dashed=1;" vertex="1" parent="1"><mxGeometry x="620" y="380" width="180" height="90" as="geometry"/></mxCell>
+        <mxCell id="e1" value="HTTP" style="labelBackgroundColor=#f5f5f5;endArrow=block;html=1;strokeColor=#666666;fontColor=#333333;fontFamily=Noto Sans CJK SC;" edge="1" parent="1" source="client" target="api"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" value="读写 / 入队" style="labelBackgroundColor=#f5f5f5;endArrow=block;html=1;strokeColor=#666666;fontColor=#333333;fontFamily=Noto Sans CJK SC;" edge="1" parent="1" source="api" target="pg"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" value="检索 / 写索引" style="labelBackgroundColor=#f5f5f5;endArrow=block;html=1;strokeColor=#666666;fontColor=#333333;fontFamily=Noto Sans CJK SC;" edge="1" parent="1" source="api" target="qdrant"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" value="领取 / 结算" style="labelBackgroundColor=#f5f5f5;endArrow=block;html=1;strokeColor=#666666;fontColor=#333333;fontFamily=Noto Sans CJK SC;" edge="1" parent="1" source="worker" target="pg"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" value="写文本 / 视觉点" style="labelBackgroundColor=#f5f5f5;endArrow=block;html=1;strokeColor=#666666;fontColor=#333333;fontFamily=Noto Sans CJK SC;" edge="1" parent="1" source="worker" target="qdrant"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" value="图片编码（可选）" style="labelBackgroundColor=#f5f5f5;endArrow=block;html=1;strokeColor=#666666;fontColor=#333333;fontFamily=Noto Sans CJK SC;dashed=1;" edge="1" parent="1" source="worker" target="visual"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e8" value="查询编码（可选）" style="labelBackgroundColor=#f5f5f5;endArrow=block;html=1;strokeColor=#666666;fontColor=#333333;fontFamily=Noto Sans CJK SC;dashed=1;edgeStyle=orthogonalEdgeStyle;exitX=0.5;exitY=0;entryX=1;entryY=0.5;" edge="1" parent="1" source="api" target="visual">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="365" y="20"/><mxPoint x="880" y="20"/><mxPoint x="880" y="425"/></Array></mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

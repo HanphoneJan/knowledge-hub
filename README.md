@@ -20,7 +20,7 @@
 | 测试 | pytest **1335** · 前端 vitest **316** · 三套验收 1b **138** / 1c **218** / 1d **199** |
 | 检索 | 四条腿 RRF 融合：dense（bge-small-zh）· BM25（自实现）· trgm · **视觉**（colSmol late-interaction 多向量 MaxSim）|
 | 前端 | React 19 + Vite 7 + Tailwind v4；**零 CDN / 零 Web Font**（内网离线可用）|
-| 规模 | services ≈ **25k** 行（90 个模块）· 测试 ≈ **23k** 行（79 个文件）· 前端 ≈ **16k** 行 |
+| 规模 | services ≈ **25k** 行（90 个模块）· 测试 ≈ **23k** 行（80 个文件）· 前端 ≈ **16k** 行 |
 
 > 下图为**合成演示数据**（自造的产品 / 运维 / 接口文档），不含任何真实资料。
 
@@ -144,8 +144,8 @@ services/
   worker/       handlers/（摄取与清理任务）+ doc_state.py（终态判定）
   mcp/          MCP Server（4 个工具）
 web/            React + Vite 前端（架构与规矩见 web/README.md）
-docs/           深度拆解 · 架构 · 检索 · 文档处理 · 数据模型 · 多租户 · 任务 · 前端 · 测试 · 运维 · 踩坑
-                + API 契约（DESIGN-API.md）
+docs/           架构 · 摄取 · 检索 · 数据模型 · 多租户 · 任务与运维 · 接口 · 前端 · 测试 · 踩坑
+                + API 契约（DESIGN-API.md）+ diagrams/（draw.io 源文件与 SVG）
 deploy/         dev.sh / ci.sh / monitor.py / backup.sh / restore.sh / seed_photos.py
                 measure_visual_leg.py / verify_*.py（手工验证脚本，不在基线里）
 eval/           三套验收脚本 + contract_check.py + _fixtures.py + _reset.py
@@ -158,23 +158,21 @@ tests/          pytest
 
 ## 文档
 
-面向读者的文档在 [`docs/`](./docs)：深度拆解、架构总览、检索与融合、文档处理、数据模型、多租户、任务队列、**API 契约**（82 个端点）、MCP/A2A、前端、测试验收、部署运维与踩坑。
+面向读者的文档在 [`docs/`](./docs)：架构总览、文档摄取、检索与问答、数据模型、多租户、任务与运维、**API 契约**（82 个端点）、MCP/A2A、前端、测试验收与踩坑。
 
 | 文档 | 讲什么 |
 |---|---|
-| [`docs/README.md`](./docs/README.md) | 索引 + 从哪读起 |
-| [`docs/deep-dive.md`](./docs/deep-dive.md) | 项目深度拆解：设计决策背后的“为什么”与可迁移的可靠性模式 |
-| [`docs/architecture.md`](./docs/architecture.md) | 进程模型、数据流、存储分工、多租户、刻意的边界 |
-| [`docs/retrieval.md`](./docs/retrieval.md) | 四条腿、RRF 融合、查询路由、降级行为、L3 引用坐标 |
-| [`docs/ingestion.md`](./docs/ingestion.md) | 解析器、六种切分策略、分层校验、坐标提取、PII |
-| [`docs/data-model.md`](./docs/data-model.md) | PostgreSQL 表结构、Qdrant 布局、稳定点 ID、删除与对账 |
-| [`docs/tenancy.md`](./docs/tenancy.md) | API Key、三档可见性、fail-closed、超管、邀请码与审计 |
-| [`docs/jobs.md`](./docs/jobs.md) | 任务队列、文档终态判定、视觉服务与进程模型 |
+| [`docs/README.md`](./docs/README.md) | 索引与按目标挑读法 |
+| [`docs/architecture.md`](./docs/architecture.md) | 三个进程、两个存储、上传与检索主链路、刻意的边界 |
+| [`docs/ingestion.md`](./docs/ingestion.md) | 解析器、六种切分策略、分层校验、坐标、PII 与导入 |
+| [`docs/retrieval.md`](./docs/retrieval.md) | 四条腿、RRF、查询路由、改写 / 精排 / 拒答、SSE 与 L3 |
+| [`docs/data-model.md`](./docs/data-model.md) | 18 张表、Qdrant 三集合、稳定点 ID、删除链与对账 |
+| [`docs/tenancy.md`](./docs/tenancy.md) | API Key、三档可见性、fail-closed、邀请码、审计与隐私 |
+| [`docs/jobs-operations.md`](./docs/jobs-operations.md) | 任务队列、文档终态、进程与内存、巡检、备份、蓝绿重建 |
 | [`docs/DESIGN-API.md`](./docs/DESIGN-API.md) | **API 契约**（82 个端点、错误码、分页）。改端点先改它 —— `eval/contract_check.py` 会校验 |
-| [`docs/mcp-a2a.md`](./docs/mcp-a2a.md) | MCP 四个工具、A2A 两个 skill、权限裁剪与错误语义 |
-| [`docs/frontend.md`](./docs/frontend.md) | 应用外壳、三大功能区、主题、SSE 与引用渲染 |
-| [`docs/testing.md`](./docs/testing.md) | 五层验收、CI 门禁与结构守卫 |
-| [`docs/operations.md`](./docs/operations.md) | 启动 / 重启、巡检、备份恢复、对外访问 |
+| [`docs/api-mcp-a2a.md`](./docs/api-mcp-a2a.md) | HTTP 约定、MCP 四个工具、A2A 两个 skill、契约治理 |
+| [`docs/frontend.md`](./docs/frontend.md) | 外壳与路由、SSE、引用画框、知识库与设置、主题 |
+| [`docs/testing.md`](./docs/testing.md) | 五层验收、CI 门禁、检索回放与结构守卫 |
 | [`docs/pitfalls.md`](./docs/pitfalls.md) | 五条硬约束与一批“不报错但结果是错的”问题 |
 
 ## 五条硬约束（违反即错）
