@@ -58,7 +58,7 @@ src/
     login/         登录 / 注册
   components/ui/   Button / Badge / Card / Table / Input / Textarea / Select / Switch / Segmented /
                    Tabs / Dialog / Sheet / Tooltip / Progress / Skeleton / EmptyState / Alert / Menu /
-                   Avatar / RichText / Spinner / Page(+PageHeader)
+                   Avatar / RichText / Spinner / Confirm / Toast / Page(+PageHeader)
   lib/             纯逻辑核心（`src/lib/*`：API 客户端、SSE、坐标、时间线…各自带单测）
   types/api.ts     契约的手抄投影（接口对齐的唯一真相）
 ```
@@ -66,7 +66,7 @@ src/
 ## 样式系统与主题
 
 五条规矩（**只在这一处维护**）：颜色只出现在 `styles.css` 的 `:root`/`.dark` 两段；token 名沿用 RAGFlow；
-原生控件优先；`cn()` 要注册自定义字号；`RichText` 渲染 `**粗体**`；危险动作走原生 `confirm`。
+原生控件优先；`cn()` 要注册自定义字号；`RichText` 渲染 `**粗体**`；危险动作走 `useConfirm()`、非决策错误走 `useToast()`。
 
 本文件只补三点**这套实现特有**的：
 

@@ -3,7 +3,7 @@
  *
  * 判定逻辑全在冻结的纯逻辑里（`lib/pii.ts` / `lib/rerank.ts`），这里只做接线：
  * - 🔑 `maskState` / `rerankState` 的 `null` 语义（"不启用"而不是"用默认"）别自己重写；
- * - ⚠️ 确认文案用**原生 `window.confirm`** + `plainText()`（去掉 markdown 星号与 emoji）；
+ * - ⚠️ 确认走应用内 `useConfirm()`（危险动作的初始焦点在"取消"上，见 `ui/confirm`）；
  * - ⚠️ 改分块参数**不回溯**，要提示"去文档 tab 点重新解析"；
  * - ⚠️ 契约里 `GET /kb` 没有 `chunk_strategy` 字段（前端类型也没有），所以这里
  *   **不提供**切分策略下拉 —— 改策略要用后端 CLI/脚本，这不是前端漏做，是类型面就这样。
@@ -15,6 +15,7 @@ import { useNavigate } from "react-router-dom";
 import { Alert } from "../../../components/ui/alert";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
+import { useConfirm } from "../../../components/ui/confirm";
 import {
   Dialog,
   DialogContent,
@@ -53,6 +54,7 @@ const RERANK_DEFAULT_MODEL = "BAAI/bge-reranker-v2-m3";
 export function KbSettingsTab({ kb }: { kb: KbDetail }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const [note, setNote] = React.useState<string | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
   const [confirmDel, setConfirmDel] = React.useState(false);
@@ -262,7 +264,13 @@ export function KbSettingsTab({ kb }: { kb: KbDetail }) {
               size="sm"
               disabled={piiM.isPending || piiState.masking === "on"}
               onClick={() => {
-                if (window.confirm(plainText(maskOnConfirmText(rep)))) piiM.mutate(true);
+                void confirm({
+                  title: "开启 PII 掩码？",
+                  description: plainText(maskOnConfirmText(rep)),
+                  confirmLabel: "开启",
+                }).then((ok) => {
+                  if (ok) piiM.mutate(true);
+                });
               }}
             >
               {piiState.masking === "on" ? "已开启" : "开启掩码"}
@@ -272,7 +280,14 @@ export function KbSettingsTab({ kb }: { kb: KbDetail }) {
               size="sm"
               disabled={piiM.isPending || piiState.masking === "off"}
               onClick={() => {
-                if (window.confirm(plainText(maskOffConfirmText()))) piiM.mutate(false);
+                void confirm({
+                  title: "关闭 PII 掩码？",
+                  description: plainText(maskOffConfirmText()),
+                  confirmLabel: "关闭",
+                  danger: true,
+                }).then((ok) => {
+                  if (ok) piiM.mutate(false);
+                });
               }}
             >
               关闭掩码
@@ -350,7 +365,13 @@ export function KbSettingsTab({ kb }: { kb: KbDetail }) {
               variant={rr.on ? "secondary" : "default"}
               disabled={rerankM.isPending || rr.on}
               onClick={() => {
-                if (window.confirm(plainText(RERANK_HINT))) rerankM.mutate(true);
+                void confirm({
+                  title: "开启精排？",
+                  description: plainText(RERANK_HINT),
+                  confirmLabel: "开启",
+                }).then((ok) => {
+                  if (ok) rerankM.mutate(true);
+                });
               }}
             >
               开启精排

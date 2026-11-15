@@ -19,9 +19,10 @@ import * as React from "react";
 import { Alert } from "../../../components/ui/alert";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card";
+import { useConfirm } from "../../../components/ui/confirm";
 import { Label } from "../../../components/ui/label";
 import { Progress } from "../../../components/ui/progress";
-import { RichText, plainText } from "../../../components/ui/rich-text";
+import { RichText } from "../../../components/ui/rich-text";
 import { Select } from "../../../components/ui/select";
 import { api, errText } from "../../../lib/api";
 import { staleStrategyHint } from "../../../lib/kbStrategy";
@@ -47,6 +48,7 @@ export function StrategyCard({
   onNote: (m: string) => void;
 }) {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const current = strategyOf(kb);
   const [target, setTarget] = React.useState<ChunkStrategy>(current);
   const [done, setDone] = React.useState(0);
@@ -185,16 +187,14 @@ export function StrategyCard({
               size="sm"
               disabled={!plan.enabled || reparseM.isPending}
               onClick={() => {
-                if (
-                  window.confirm(
-                    plainText(
-                      `重新解析「${kb.name}」的全部 ${docs.length} 份文档？\n\n` +
-                        "每份都会被重新切分、重新编码，耗时可能几分钟（可以在「文档」tab 看进度）。",
-                    ),
-                  )
-                ) {
-                  reparseM.mutate();
-                }
+                void confirm({
+                  title: `重新解析「${kb.name}」的全部 ${docs.length} 份文档？`,
+                  description:
+                    "每份都会被重新切分、重新编码，耗时可能几分钟（可以在「文档」tab 看进度）。",
+                  confirmLabel: "开始重新解析",
+                }).then((ok) => {
+                  if (ok) reparseM.mutate();
+                });
               }}
             >
               <RefreshCw aria-hidden="true" className={reparseM.isPending ? "size-3.5 animate-spin" : "size-3.5"} />

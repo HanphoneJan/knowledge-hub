@@ -100,6 +100,7 @@ export function SearchTab({ kb }: { kb: KbDetail }) {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={`在「${kb.name}」里搜点什么…`}
+              aria-label={`在「${kb.name}」里检索`}
               className="h-9 min-w-[12rem] flex-1 rounded-xl border-[0.5px] border-border-button bg-bg-input px-3 text-sm text-text-primary outline-none focus-visible:ring-1 focus-visible:ring-accent-primary"
             />
             <Select
@@ -217,6 +218,8 @@ function HitThumb({ url, alt }: { url: string; alt: string }) {
     <img
       src={blob.url}
       alt={alt}
+      loading="lazy"
+      decoding="async"
       className="max-h-[240px] w-auto rounded-lg border-[0.5px] border-border-button bg-paper object-contain"
       style={{ height: 96 }}
     />

@@ -11,7 +11,9 @@ import * as React from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Spinner } from "../../components/ui/spinner";
+import { useToast } from "../../components/ui/toast";
 import { cn } from "../../lib/cn";
+import { copyText } from "../../lib/clipboard";
 import { AnswerText } from "./AnswerText";
 import { toRefs } from "./citations";
 import type { Turn } from "./types";
@@ -98,7 +100,10 @@ function AssistantBlock({
         )}
 
         {turn.status === "error" && (
-          <div className="mt-2 flex items-center gap-2 rounded-lg bg-state-error-5 px-2.5 py-1.5 text-13 text-state-error">
+          <div
+            role="alert"
+            className="mt-2 flex items-center gap-2 rounded-lg bg-state-error-5 px-2.5 py-1.5 text-13 text-state-error"
+          >
             <AlertTriangle aria-hidden="true" className="size-3.5 shrink-0" />
             <span className="min-w-0 flex-1 truncate">生成中断：{turn.error}</span>
             {onRetry && turn.question && (
@@ -157,18 +162,17 @@ function AssistantBlock({
 
 function CopyButton({ text }: { text: string }) {
   const [ok, setOk] = React.useState(false);
+  const toast = useToast();
   return (
     <button
       type="button"
-      aria-label="复制回答"
+      aria-label={ok ? "已复制" : "复制回答"}
       onClick={() => {
-        void navigator.clipboard?.writeText(text).then(
-          () => {
-            setOk(true);
-            window.setTimeout(() => setOk(false), 1500);
-          },
-          () => setOk(false),
-        );
+        void copyText(text).then((copied) => {
+          setOk(copied);
+          if (copied) window.setTimeout(() => setOk(false), 1500);
+          else toast.error("复制失败：浏览器不允许访问剪贴板，请手动选中复制。");
+        });
       }}
       className={cn(
         "inline-flex size-5 items-center justify-center rounded text-text-disabled transition-colors hover:text-text-primary",

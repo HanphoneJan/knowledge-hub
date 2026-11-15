@@ -399,6 +399,26 @@
   }
 }
 
+/* ---------- 偏好：减少动效 ----------
+ * 对话框缩放、抽屉横滑、骨架 pulse、卡片缩放对前庭敏感用户是负担。
+ * 统一压到"几乎不动"；`animate-spin` 例外 —— 它承载"还在处理"的状态，
+ * 冻住会被误读成卡死。
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .animate-spin {
+    animation-duration: 1s !important;
+    animation-iteration-count: infinite !important;
+  }
+}
+
 /* ---------- 项目级小工具 ---------- */
 /* `@utility` 定义的是**真正的 Tailwind 工具类**（进 utilities 层、可被
    tree-shake、可加变体），不是"迁移残留的 class + CSS"。 */

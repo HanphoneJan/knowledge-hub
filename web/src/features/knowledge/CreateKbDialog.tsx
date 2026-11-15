@@ -102,7 +102,16 @@ export function CreateKbDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader>
+        {/* 用原生 form：IME 组合期间的 Enter 由浏览器抑制，不会把还没选完的
+            中文名字直接提交（`onKeyDown` 自己判 isComposing 是下策）。 */}
+        <form
+          className="flex flex-col gap-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit();
+          }}
+        >
+          <DialogHeader>
           <DialogTitle>新建知识库</DialogTitle>
           <DialogDescription>
             来源类型建库时定死，之后不能改 —— 选错就换一个库。
@@ -117,9 +126,6 @@ export function CreateKbDialog({
               value={name}
               placeholder="例如：产品资料"
               onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") submit();
-              }}
             />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -191,14 +197,15 @@ export function CreateKbDialog({
           {err && <Alert tone="danger">{err}</Alert>}
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            取消
-          </Button>
-          <Button onClick={submit} loading={createM.isPending}>
-            创建
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              取消
+            </Button>
+            <Button type="submit" loading={createM.isPending}>
+              创建
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

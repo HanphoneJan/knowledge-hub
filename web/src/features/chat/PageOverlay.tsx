@@ -126,10 +126,15 @@ export function PageOverlay({
             </div>
           )}
           {blob.url && (
-            <div className="relative w-full">
+            <div
+              className="relative w-full"
+              // 图还没解码完时先按页面/照片的常见比例占位，避免抽屉内容跳一下（CLS）。
+              style={size ? undefined : { aspectRatio: isImage ? "4 / 3" : "1 / 1.414" }}
+            >
               <img
                 src={blob.url}
                 alt={`${fileName} 第 ${page} 页`}
+                decoding="async"
                 className="block w-full"
                 onLoad={(e) => {
                   const el = e.currentTarget;

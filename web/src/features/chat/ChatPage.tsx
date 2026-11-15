@@ -22,9 +22,20 @@ import * as React from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { Alert } from "../../components/ui/alert";
-import { plainText } from "../../components/ui/rich-text";
+import { Button } from "../../components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../../components/ui/dialog";
+import { Input } from "../../components/ui/input";
+import { Label } from "../../components/ui/label";
 import { PageSpinner } from "../../components/ui/spinner";
+import { useToast } from "../../components/ui/toast";
 import { api, errText } from "../../lib/api";
+import { copyText } from "../../lib/clipboard";
 import { validateTitle } from "../../lib/sessions";
 import { Keys } from "../../app/queryKeys";
 import { useScope } from "../../app/scope";
@@ -40,6 +51,7 @@ export function ChatPage() {
   const { sessionId } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const toast = useToast();
   const { kbIds, label } = useScope();
 
   const sid = sessionId ? Number(sessionId) : null;
@@ -59,6 +71,10 @@ export function ChatPage() {
   const [focusIdx, setFocusIdx] = React.useState<number | null>(null);
   /** 点角标时记住"这是哪一轮的引用"（每轮回答有自己的 sources）。 */
   const [focusTurn, setFocusTurn] = React.useState<string | null>(null);
+  /** 重命名：用应用内对话框（原生 `prompt` 无法校验、样式不可控）。 */
+  const [renameOpen, setRenameOpen] = React.useState(false);
+  const [renameValue, setRenameValue] = React.useState("");
+  const [renameErr, setRenameErr] = React.useState<string | null>(null);
 
   const onSessionCreated = React.useCallback(
     (id: number) => {
@@ -107,24 +123,29 @@ export function ChatPage() {
   const renameM = useMutation({
     mutationFn: (title: string) => api.renameSession(sid as number, title),
     onSuccess: () => {
+      setRenameOpen(false);
+      setRenameErr(null);
       void qc.invalidateQueries({ queryKey: Keys.session(sid as number) });
       void qc.invalidateQueries({ queryKey: Keys.sessions() });
     },
-    onError: (e) => window.alert(plainText(errText(e))),
+    onError: (e) => setRenameErr(errText(e)),
   });
 
   const handleRename = React.useCallback(() => {
     if (sid == null) return;
-    const current = sessionQ.data?.title ?? "";
-    const next = window.prompt("会话标题", current);
-    if (next == null) return;
-    const bad = validateTitle(next);
+    setRenameValue(sessionQ.data?.title ?? "");
+    setRenameErr(null);
+    setRenameOpen(true);
+  }, [sid, sessionQ.data]);
+
+  const submitRename = React.useCallback(() => {
+    const bad = validateTitle(renameValue);
     if (bad) {
-      window.alert(bad);
+      setRenameErr(bad);
       return;
     }
-    renameM.mutate(next.trim());
-  }, [sid, sessionQ.data, renameM]);
+    renameM.mutate(renameValue.trim());
+  }, [renameValue, renameM]);
 
   const handleCite = React.useCallback((turnKey: string, idx: number) => {
     setFocusTurn(turnKey);
@@ -153,11 +174,34 @@ export function ChatPage() {
 
   const handleCopyAll = React.useCallback(() => {
     const text = turns.map((t) => `${t.role === "user" ? "我" : "助手"}：${t.content}`).join("\n\n");
-    void navigator.clipboard?.writeText(text);
+    void copyText(text).then((ok) => {
+      if (!ok) toast.error("复制失败：浏览器不允许访问剪贴板，请手动选中复制。");
+    });
+  }, [turns, toast]);
+
+  /**
+   * 读屏播报：**只在状态切换时说一句**，不在每个 token 上念。
+   * 正文本身是逐字长出来的，挂 aria-live 会让读屏从头念到尾。
+   * 失败不在这里播 —— 错误框自己带 role="alert"。
+   */
+  const announce = React.useMemo(() => {
+    const last = turns[turns.length - 1];
+    if (!last || last.role !== "assistant") return "";
+    if (last.status === "streaming") {
+      return last.content ? "正在生成回答…" : "正在检索证据…";
+    }
+    if (last.status === "done") return `回答完成，共 ${last.citations?.length ?? 0} 条引用。`;
+    if (last.status === "stopped") return "已停止生成。";
+    return "";
   }, [turns]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {/* 常驻的播报区：文本只在状态切换时变（检索 → 生成 → 完成）。 */}
+      <div className="sr-only" role="status" aria-live="polite">
+        {announce}
+      </div>
+
       <ChatTopBar
         title={title}
         onRename={sid != null ? handleRename : undefined}
@@ -206,6 +250,54 @@ export function ChatPage() {
         history={activeTurn?.history}
         focusIdx={focusIdx}
       />
+
+      <Dialog
+        open={renameOpen}
+        onOpenChange={(v) => {
+          setRenameOpen(v);
+          if (!v) setRenameErr(null);
+        }}
+      >
+        <DialogContent>
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              submitRename();
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>重命名会话</DialogTitle>
+            </DialogHeader>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="session-title">标题</Label>
+              <Input
+                id="session-title"
+                value={renameValue}
+                onChange={(e) => {
+                  setRenameValue(e.target.value);
+                  if (renameErr) setRenameErr(null);
+                }}
+                aria-invalid={renameErr ? true : undefined}
+                aria-describedby={renameErr ? "session-title-err" : undefined}
+              />
+              {renameErr && (
+                <div id="session-title-err" className="text-2xs text-state-error" role="alert">
+                  {renameErr}
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setRenameOpen(false)}>
+                取消
+              </Button>
+              <Button type="submit" loading={renameM.isPending}>
+                保存
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

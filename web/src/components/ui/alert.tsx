@@ -32,6 +32,7 @@ export function Alert({
   actions,
   className,
   icon = true,
+  id,
 }: {
   tone?: AlertTone;
   title?: React.ReactNode;
@@ -39,11 +40,14 @@ export function Alert({
   actions?: React.ReactNode;
   className?: string;
   icon?: boolean;
+  /** 供 `aria-describedby` 指向这条提示。 */
+  id?: string;
 }) {
   const { cls, Icon } = TONE[tone];
   return (
     <div
-      role="status"
+      id={id}
+      role={tone === "danger" ? "alert" : "status"}
       className={cn(
         "flex items-start gap-2.5 rounded-xl border-[0.5px] px-3.5 py-2.5 text-sm",
         cls,

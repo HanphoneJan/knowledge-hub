@@ -20,6 +20,7 @@ import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
 import { SkeletonRows } from "../../../components/ui/skeleton";
 import { api, errText } from "../../../lib/api";
+import { useInView } from "../../../lib/useInView";
 import {
   anniversaryLabel,
   dayMarks,
@@ -156,6 +157,12 @@ export function TimelineTab({ kb }: { kb: KbDetail }) {
                       key={d}
                       type="button"
                       onClick={() => setParam({ date: active ? null : d })}
+                      aria-pressed={active}
+                      aria-label={
+                        m
+                          ? `${d}：${m.total} 条消息${m.photos ? `，${m.photos} 张照片` : ""}`
+                          : `${d}：日历里没有标记（不代表那天没记录）`
+                      }
                       title={
                         m
                           ? `${d}：${m.total} 条消息${m.photos ? ` · ${m.photos} 张照片` : ""}`
@@ -311,8 +318,24 @@ function Milestones({ kbId }: { kbId: number }) {
 }
 
 function DayThumb({ docId, name }: { docId: number; name: string }) {
-  const blob = useBlobUrl(() => api.photoBlob(docId), [docId]);
-  if (blob.error) return <div className="flex h-20 items-center justify-center rounded-lg bg-bg-card text-2xs text-state-error">图挂了</div>;
-  if (!blob.url) return <div className="h-20 animate-pulse rounded-lg bg-bg-card" />;
-  return <img src={blob.url} alt={name} className="h-20 w-full rounded-lg object-cover" />;
+  const { ref, inView } = useInView<HTMLDivElement>();
+  const blob = useBlobUrl(inView ? () => api.photoBlob(docId) : null, [docId, inView]);
+  return (
+    <div ref={ref} className="h-20">
+      {blob.error ? (
+        <div className="flex h-20 items-center justify-center rounded-lg bg-bg-card text-2xs text-state-error">
+          图挂了
+        </div>
+      ) : !blob.url ? (
+        <div className="h-20 animate-pulse rounded-lg bg-bg-card" />
+      ) : (
+        <img
+          src={blob.url}
+          alt={name}
+          decoding="async"
+          className="h-20 w-full rounded-lg object-cover"
+        />
+      )}
+    </div>
+  );
 }

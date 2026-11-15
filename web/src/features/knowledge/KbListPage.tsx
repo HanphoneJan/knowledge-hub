@@ -9,15 +9,17 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { BookText, Clock, Plus, Scissors } from "lucide-react";
 import * as React from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
+import { useConfirm } from "../../components/ui/confirm";
 import { EmptyState } from "../../components/ui/empty-state";
 import { Menu } from "../../components/ui/menu";
 import { Page, PageHeader } from "../../components/ui/page";
 import { Select } from "../../components/ui/select";
 import { Skeleton } from "../../components/ui/skeleton";
+import { useToast } from "../../components/ui/toast";
 import { api, errText } from "../../lib/api";
 import { plainText } from "../../components/ui/rich-text";
 import { Keys } from "../../app/queryKeys";
@@ -81,7 +83,7 @@ export function KbListPage() {
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {kbsInWs.map((k) => (
-            <KbCard key={k.id} kb={k} onOpen={() => navigate(`/kb/${k.id}`)} />
+            <KbCard key={k.id} kb={k} />
           ))}
         </div>
       )}
@@ -96,52 +98,57 @@ export function KbListPage() {
   );
 }
 
-function KbCard({ kb, onOpen }: { kb: Kb; onOpen: () => void }) {
+function KbCard({ kb }: { kb: Kb }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
+  const confirm = useConfirm();
+  const toast = useToast();
+  const open = React.useCallback(() => navigate(`/kb/${kb.id}`), [navigate, kb.id]);
   const removeM = useMutation({
     mutationFn: () => api.deleteKb(kb.id),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: Keys.kbs() });
       void qc.invalidateQueries({ queryKey: Keys.kbTrash() });
     },
-    onError: (e) => window.alert(plainText(errText(e))),
+    onError: (e) => toast.error(plainText(errText(e))),
   });
 
   return (
-    <Card
-      className="group flex cursor-pointer flex-col gap-3 p-4 transition-colors hover:border-border-default"
-      onClick={onOpen}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") onOpen();
-      }}
-    >
+    <Card className="group relative flex cursor-pointer flex-col gap-3 p-4 transition-colors hover:border-border-default">
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-bg-card text-text-secondary">
             <BookText aria-hidden="true" className="size-4" />
           </span>
-          <span className="truncate text-sm font-medium text-text-primary">{kb.name}</span>
+          {/* 拉伸链接：整张卡可点，但语义是真正的链接（不再给 div 加
+              role="button" —— 那里面还嵌着菜单按钮，读屏会念成按钮套按钮）。
+              `after:` 那一层盖住卡片；菜单用 z-10 浮在它上面。 */}
+          <Link
+            to={`/kb/${kb.id}`}
+            className="min-w-0 truncate text-sm font-medium text-text-primary after:absolute after:inset-0 after:rounded-2xl focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-accent-primary"
+          >
+            {kb.name}
+          </Link>
         </div>
-        <span onClick={(e) => e.stopPropagation()} className="shrink-0">
+        <span className="relative z-10 shrink-0">
           <Menu
             items={[
-              { key: "open", label: "打开", onSelect: onOpen },
+              { key: "open", label: "打开", onSelect: open },
               {
                 key: "delete",
                 label: "删除（软删）",
                 danger: true,
                 onSelect: () => {
-                  if (
-                    window.confirm(
-                      plainText(
-                        `删除知识库「${kb.name}」？\n\n库连同它的文档一起进回收站，30 天内可恢复（D26/D42）。`,
-                      ),
-                    )
-                  ) {
-                    removeM.mutate();
-                  }
+                  void confirm({
+                    title: `删除知识库「${kb.name}」？`,
+                    description: plainText(
+                      "库连同它的文档一起进回收站，30 天内可恢复（D26/D42）。",
+                    ),
+                    confirmLabel: "删除",
+                    danger: true,
+                  }).then((ok) => {
+                    if (ok) removeM.mutate();
+                  });
                 },
               },
             ]}

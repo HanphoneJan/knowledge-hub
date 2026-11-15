@@ -35,7 +35,7 @@ export function KbDetailPage() {
   const { kbId } = useParams();
   const id = Number(kbId);
   const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
 
   const kbQ = useQuery({
     queryKey: Keys.kb(id),
@@ -49,13 +49,14 @@ export function KbDetailPage() {
     ? (rawTab as TabKey)
     : "docs";
 
-  const setTab = React.useCallback(
+  /** 页签链接：只改 `tab`，其它参数（`page` / `month` / `date`）原样保留。 */
+  const tabHref = React.useCallback(
     (next: string) => {
       const p = new URLSearchParams(params);
       p.set("tab", next);
-      setParams(p, { replace: true });
+      return `?${p.toString()}`;
     },
-    [params, setParams],
+    [params],
   );
 
   const items = React.useMemo(() => {
@@ -74,8 +75,13 @@ export function KbDetailPage() {
         icon: Image,
       });
     }
-    return out as Array<{ value: string; label: string; icon: typeof FileText }>;
-  }, [kb]);
+    return out.map((it) => ({ ...it, href: tabHref(it.value) })) as Array<{
+      value: string;
+      label: string;
+      icon: typeof FileText;
+      href: string;
+    }>;
+  }, [kb, tabHref]);
 
   if (!Number.isFinite(id)) {
     return (
@@ -140,7 +146,7 @@ export function KbDetailPage() {
           )}
 
           <div className="mt-3">
-            <Tabs value={tab} onChange={setTab} items={items} className="border-b-0" />
+            <Tabs value={tab} items={items} className="border-b-0" label="知识库分区" replace />
           </div>
         </div>
       </header>

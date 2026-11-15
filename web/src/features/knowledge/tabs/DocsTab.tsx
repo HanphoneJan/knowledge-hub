@@ -18,6 +18,7 @@ import * as React from "react";
 import { Alert } from "../../../components/ui/alert";
 import { Button } from "../../../components/ui/button";
 import { Card } from "../../../components/ui/card";
+import { useConfirm } from "../../../components/ui/confirm";
 import {
   Dialog,
   DialogContent,
@@ -48,7 +49,6 @@ import {
   overwriteNotice,
   type PurgeResp,
 } from "../../../lib/trash";
-import { plainText } from "../../../components/ui/rich-text";
 import { Keys } from "../../../app/queryKeys";
 import type { DocumentRow, KbDetail } from "../../../types/api";
 import { ChunksDialog } from "../ChunksDialog";
@@ -59,6 +59,7 @@ const DOC_TERMINAL = ["ready", "failed", "deleted"];
 
 export function DocsTab({ kb }: { kb: KbDetail }) {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const [uploading, setUploading] = React.useState(false);
   const [phase, setPhase] = React.useState<UploadPhase | null>(null);
   const [batch, setBatch] = React.useState<BatchItem[] | null>(null);
@@ -246,15 +247,14 @@ export function DocsTab({ kb }: { kb: KbDetail }) {
           onRetry={(d) => retryM.mutate(d)}
           onReparse={(d) => reparseM.mutate(d)}
           onDelete={(d) => {
-            if (
-              window.confirm(
-                plainText(
-                  `把「${d.file_name}」移进回收站？\n\n这是软删除：30 天内可以恢复（D26）。`,
-                ),
-              )
-            ) {
-              deleteM.mutate(d);
-            }
+            void confirm({
+              title: `把「${d.file_name}」移进回收站？`,
+              description: "这是软删除：30 天内可以恢复（D26）。",
+              confirmLabel: "移进回收站",
+              danger: true,
+            }).then((ok) => {
+              if (ok) deleteM.mutate(d);
+            });
           }}
           onChunks={(d) => setChunksDoc(d)}
         />

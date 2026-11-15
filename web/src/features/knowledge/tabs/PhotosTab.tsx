@@ -27,6 +27,7 @@ import { EmptyState } from "../../../components/ui/empty-state";
 import { Skeleton } from "../../../components/ui/skeleton";
 import { api, errText } from "../../../lib/api";
 import { formatBytes } from "../../../lib/trash";
+import { useInView } from "../../../lib/useInView";
 import {
   PHOTO_PAGE_SIZE,
   parsePhotoPage,
@@ -148,9 +149,16 @@ export function PhotosTab({ kb }: { kb: KbDetail }) {
 }
 
 function PhotoCell({ photo, onOpen }: { photo: PhotoRow; onOpen: () => void }) {
-  const blob = useBlobUrl(() => api.photoBlob(photo.doc_id), [photo.doc_id]);
+  // ⚠️ `/preview` 返回的是**原件**（不是缩略图）—— 一页 24 张一起取就是几十 MB。
+  // 进视口之前不发起请求；取过的不会因为滚回去再取一次。
+  const { ref, inView } = useInView<HTMLButtonElement>();
+  const blob = useBlobUrl(inView ? () => api.photoBlob(photo.doc_id) : null, [
+    photo.doc_id,
+    inView,
+  ]);
   return (
     <button
+      ref={ref}
       type="button"
       onClick={onOpen}
       className="group relative aspect-square overflow-hidden rounded-xl border-[0.5px] border-border-button bg-bg-card"
@@ -160,6 +168,7 @@ function PhotoCell({ photo, onOpen }: { photo: PhotoRow; onOpen: () => void }) {
         <img
           src={blob.url}
           alt={photo.file_name}
+          decoding="async"
           className="size-full object-cover transition-transform group-hover:scale-[1.02]"
         />
       ) : (
@@ -180,5 +189,5 @@ function LightboxImage({ docId, name }: { docId: number; name: string }) {
   const blob = useBlobUrl(() => api.photoBlob(docId), [docId]);
   if (blob.error) return <Alert tone="danger">{blob.error}</Alert>;
   if (!blob.url) return <Skeleton className="h-64 w-full" />;
-  return <img src={blob.url} alt={name} className="max-h-[70vh] w-full rounded-xl object-contain" />;
+  return <img src={blob.url} alt={name} decoding="async" className="max-h-[70vh] w-full rounded-xl object-contain" />;
 }

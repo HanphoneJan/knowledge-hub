@@ -27,6 +27,8 @@ import {
   DialogTitle,
 } from "../../../components/ui/dialog";
 import { EmptyState } from "../../../components/ui/empty-state";
+import { useConfirm } from "../../../components/ui/confirm";
+import { useToast } from "../../../components/ui/toast";
 import { Input } from "../../../components/ui/input";
 import { Label } from "../../../components/ui/label";
 import { RichText, plainText } from "../../../components/ui/rich-text";
@@ -34,6 +36,7 @@ import { Select } from "../../../components/ui/select";
 import { SkeletonRows } from "../../../components/ui/skeleton";
 import { Tabs } from "../../../components/ui/tabs";
 import { api, errText } from "../../../lib/api";
+import { copyText } from "../../../lib/clipboard";
 import {
   addMemberHint,
   allWsLabel,
@@ -56,6 +59,7 @@ export function MembersSection() {
   const qc = useQueryClient();
   const { user } = useAuth();
   const { kbs } = useScope();
+  const confirm = useConfirm();
   const [tab, setTab] = React.useState<"list" | "redeem">("list");
   const [err, setErr] = React.useState<string | null>(null);
   const [note, setNote] = React.useState<string | null>(null);
@@ -99,6 +103,7 @@ export function MembersSection() {
       <Tabs
         value={tab}
         onChange={(v) => setTab(v as "list" | "redeem")}
+        label="工作区与成员视图"
         items={[
           { value: "list", label: "工作区与成员", icon: UsersRound },
           { value: "redeem", label: "用邀请码加入", icon: Ticket },
@@ -200,9 +205,16 @@ export function MembersSection() {
                                   size="icon-sm"
                                   aria-label={`移除 ${m.email}`}
                                   onClick={() => {
-                                    if (window.confirm(plainText(removeMemberText(m, user?.email ?? null)))) {
-                                      removeM.mutate(m);
-                                    }
+                                    void confirm({
+                                      title: `移除成员 ${m.display_name || m.email}？`,
+                                      description: plainText(
+                                        removeMemberText(m, user?.email ?? null),
+                                      ),
+                                      confirmLabel: "移除",
+                                      danger: true,
+                                    }).then((ok) => {
+                                      if (ok) removeM.mutate(m);
+                                    });
                                   }}
                                 >
                                   <Trash2 aria-hidden="true" className="size-3.5" />
@@ -301,40 +313,45 @@ function CreateWorkspaceDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader>
-          <DialogTitle>新建工作区</DialogTitle>
-          <DialogDescription>
-            工作区是成员的边界：你可以把知识库放进它，再邀请同事进来（邀请码在下面那张卡）。
-            建完之后你是它的 owner。
-          </DialogDescription>
-        </DialogHeader>
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="nws-name">名称</Label>
-            <Input
-              id="nws-name"
-              value={name}
-              placeholder="例如：研发部"
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && name.trim() && !tooLong) m.mutate();
-              }}
-            />
-            {tooLong && <div className="text-2xs text-state-error">名字最长 128 字（后端限制）</div>}
+        <form
+          className="flex flex-col gap-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (name.trim() && !tooLong) m.mutate();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>新建工作区</DialogTitle>
+            <DialogDescription>
+              工作区是成员的边界：你可以把知识库放进它，再邀请同事进来（邀请码在下面那张卡）。
+              建完之后你是它的 owner。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="nws-name">名称</Label>
+              <Input
+                id="nws-name"
+                value={name}
+                placeholder="例如：研发部"
+                onChange={(e) => setName(e.target.value)}
+              />
+              {tooLong && <div className="text-2xs text-state-error">名字最长 128 字（后端限制）</div>}
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="nws-desc">描述（可选）</Label>
+              <Input id="nws-desc" value={desc} onChange={(e) => setDesc(e.target.value)} />
+            </div>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="nws-desc">描述（可选）</Label>
-            <Input id="nws-desc" value={desc} onChange={(e) => setDesc(e.target.value)} />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            取消
-          </Button>
-          <Button disabled={!name.trim() || tooLong} loading={m.isPending} onClick={() => m.mutate()}>
-            创建
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              取消
+            </Button>
+            <Button type="submit" disabled={!name.trim() || tooLong} loading={m.isPending}>
+              创建
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );
@@ -362,7 +379,13 @@ function RedeemCard({ onDone, onError }: { onDone: (m: string) => void; onError:
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-2 p-4 pt-0">
-        <div className="flex flex-wrap items-end gap-2">
+        <form
+          className="flex flex-wrap items-end gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (code.trim()) m.mutate();
+          }}
+        >
           <div className="flex min-w-[16rem] flex-1 flex-col gap-1.5">
             <Label htmlFor="code">邀请码</Label>
             <Input
@@ -370,15 +393,12 @@ function RedeemCard({ onDone, onError }: { onDone: (m: string) => void; onError:
               value={code}
               placeholder="8 位，如 ABCD2345"
               onChange={(e) => setCode(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && code.trim()) m.mutate();
-              }}
             />
           </div>
-          <Button disabled={!code.trim()} loading={m.isPending} onClick={() => m.mutate()}>
+          <Button type="submit" disabled={!code.trim()} loading={m.isPending}>
             加入
           </Button>
-        </div>
+        </form>
       </CardContent>
     </Card>
   );
@@ -429,7 +449,13 @@ function AddMemberForm({
       <div className="text-2xs text-text-secondary">
         <RichText text={addMemberHint()} />
       </div>
-      <div className="flex flex-wrap items-end gap-2">
+      <form
+        className="flex flex-wrap items-end gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (email.includes("@")) m.mutate();
+        }}
+      >
         <div className="flex min-w-[14rem] flex-1 flex-col gap-1.5">
           <Label htmlFor="am-email">邮箱</Label>
           <Input
@@ -451,17 +477,19 @@ function AddMemberForm({
             ]}
           />
         </div>
-        <Button disabled={!email.includes("@")} loading={m.isPending} onClick={() => m.mutate()}>
+        <Button type="submit" disabled={!email.includes("@")} loading={m.isPending}>
           <Plus aria-hidden="true" className="size-4" />
           添加
         </Button>
-      </div>
+      </form>
     </div>
   );
 }
 
 function InvitesCard({ wsId, onError }: { wsId: number; onError: (m: string) => void }) {
   const qc = useQueryClient();
+  const confirm = useConfirm();
+  const toast = useToast();
   const q = useQuery({ queryKey: Keys.invites(wsId), queryFn: () => api.invites(wsId) });
   const [ttl, setTtl] = React.useState("7");
   const [uses, setUses] = React.useState("1");
@@ -551,7 +579,14 @@ function InvitesCard({ wsId, onError }: { wsId: number; onError: (m: string) => 
                         aria-label={`撤销邀请码 ${inv.code_prefix}`}
                         disabled={!inviteUsable(inv)}
                         onClick={() => {
-                          if (window.confirm(plainText(revokeInviteText(inv)))) revokeM.mutate(inv.id);
+                          void confirm({
+                            title: "撤销这个邀请码？",
+                            description: plainText(revokeInviteText(inv)),
+                            confirmLabel: "撤销",
+                            danger: true,
+                          }).then((ok) => {
+                            if (ok) revokeM.mutate(inv.id);
+                          });
                         }}
                       >
                         <Trash2 aria-hidden="true" className="size-3.5" />
@@ -583,10 +618,10 @@ function InvitesCard({ wsId, onError }: { wsId: number; onError: (m: string) => 
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    void navigator.clipboard?.writeText(created.code).then(
-                      () => setCopied(true),
-                      () => setCopied(false),
-                    );
+                    void copyText(created.code).then((ok) => {
+                      setCopied(ok);
+                      if (!ok) toast.error("复制失败：浏览器不允许访问剪贴板，请手动选中复制。");
+                    });
                   }}
                 >
                   <Copy aria-hidden="true" className="size-3.5" />

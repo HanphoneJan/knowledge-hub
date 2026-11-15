@@ -15,6 +15,7 @@ import { Alert } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { EmptyState } from "../../components/ui/empty-state";
+import { useToast } from "../../components/ui/toast";
 import type { SourceItem } from "../../types/api";
 import { PageOverlay } from "./PageOverlay";
 import { sourceDate, toRefs } from "./citations";
@@ -35,6 +36,7 @@ export function CitationDrawer({
   history?: boolean;
 }) {
   const refs = React.useMemo(() => toRefs(sources), [sources]);
+  const toast = useToast();
   const [active, setActive] = React.useState<number | null>(null);
 
   React.useEffect(() => {
@@ -149,7 +151,7 @@ export function CitationDrawer({
                       window.open(url, "_blank", "noopener");
                       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
                     })
-                    .catch((e: unknown) => window.alert(errText(e)));
+                    .catch((e: unknown) => toast.error(errText(e)));
                 }}
               >
                 <ExternalLink aria-hidden="true" className="size-3.5" />

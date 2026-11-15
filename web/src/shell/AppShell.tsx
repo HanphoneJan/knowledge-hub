@@ -20,6 +20,7 @@
 import * as React from "react";
 import { Outlet, useLocation } from "react-router-dom";
 
+import { PageSpinner } from "../components/ui/spinner";
 import { Sheet, SheetContent } from "../components/ui/sheet";
 import { TooltipProvider } from "../components/ui/tooltip";
 import { useMediaQuery } from "../app/scope";
@@ -53,6 +54,14 @@ export function AppShell() {
   return (
     <TooltipProvider delayDuration={300} skipDelayDuration={200}>
       <div className="flex h-full w-full overflow-hidden bg-bg-canvas text-text-primary">
+        {/* 键盘用户每页第一组焦点是三个导航项：先给一条直达内容区的捷径。 */}
+        <a
+          href="#main"
+          className="sr-only focus:not-sr-only focus:absolute focus:start-2 focus:top-2 focus:z-[60] focus:rounded-md focus:border-[0.5px] focus:border-border-button focus:bg-bg-component focus:px-3 focus:py-2 focus:text-sm focus:text-text-primary focus:shadow-lg"
+        >
+          跳到主内容
+        </a>
+
         <IconRail onOpenNav={isDesktop ? undefined : () => setNavOpen(true)} />
 
         {isDesktop ? (
@@ -67,8 +76,11 @@ export function AppShell() {
           </Sheet>
         )}
 
-        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <Outlet />
+        <main id="main" tabIndex={-1} className="flex min-w-0 flex-1 flex-col overflow-hidden outline-none">
+          {/* 路由级拆包后的惰性页面只在这一块里挂起：外壳与导航保持可见。 */}
+          <React.Suspense fallback={<PageSpinner label="正在打开页面…" />}>
+            <Outlet />
+          </React.Suspense>
         </main>
       </div>
     </TooltipProvider>

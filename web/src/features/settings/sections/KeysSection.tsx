@@ -26,10 +26,13 @@ import {
 } from "../../../components/ui/dialog";
 import { Input } from "../../../components/ui/input";
 import { Label } from "../../../components/ui/label";
+import { useConfirm } from "../../../components/ui/confirm";
 import { RichText, plainText } from "../../../components/ui/rich-text";
 import { SkeletonRows } from "../../../components/ui/skeleton";
 import { EmptyState } from "../../../components/ui/empty-state";
+import { useToast } from "../../../components/ui/toast";
 import { api, errText } from "../../../lib/api";
+import { copyText } from "../../../lib/clipboard";
 import {
   defaultKeyLabel,
   keyPrefix,
@@ -42,6 +45,8 @@ import { Keys } from "../../../app/queryKeys";
 
 export function KeysSection() {
   const qc = useQueryClient();
+  const confirm = useConfirm();
+  const toast = useToast();
   const [creating, setCreating] = React.useState(false);
   const [name, setName] = React.useState(() => defaultKeyLabel());
   const [plain, setPlain] = React.useState<string | null>(null);
@@ -91,10 +96,10 @@ export function KeysSection() {
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  void navigator.clipboard?.writeText(plain).then(
-                    () => setCopied(true),
-                    () => setCopied(false),
-                  );
+                  void copyText(plain).then((ok) => {
+                    setCopied(ok);
+                    if (!ok) toast.error("复制失败：浏览器不允许访问剪贴板，请手动选中复制。");
+                  });
                 }}
               >
                 <Copy aria-hidden="true" className="size-3.5" />
@@ -176,7 +181,14 @@ export function KeysSection() {
                             size="icon-sm"
                             aria-label={`吊销 ${k.name}`}
                             onClick={() => {
-                              if (window.confirm(plainText(revokeConfirmText(k)))) revokeM.mutate(k.id);
+                              void confirm({
+                                title: `吊销「${k.name}」？`,
+                                description: plainText(revokeConfirmText(k)),
+                                confirmLabel: "吊销",
+                                danger: true,
+                              }).then((ok) => {
+                                if (ok) revokeM.mutate(k.id);
+                              });
                             }}
                           >
                             <Trash2 aria-hidden="true" className="size-3.5" />
@@ -194,31 +206,36 @@ export function KeysSection() {
 
       <Dialog open={creating} onOpenChange={setCreating}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>新建 API Key</DialogTitle>
-            <DialogDescription>
-              名字用来区分用途（比如"家里的 MCP 客户端"）；明文只在创建后出现一次。
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="key-name">名称</Label>
-            <Input
-              id="key-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && name.trim()) createM.mutate();
-              }}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCreating(false)}>
-              取消
-            </Button>
-            <Button disabled={!name.trim()} loading={createM.isPending} onClick={() => createM.mutate()}>
-              创建
-            </Button>
-          </DialogFooter>
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (name.trim()) createM.mutate();
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>新建 API Key</DialogTitle>
+              <DialogDescription>
+                名字用来区分用途（比如"家里的 MCP 客户端"）；明文只在创建后出现一次。
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="key-name">名称</Label>
+              <Input
+                id="key-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCreating(false)}>
+                取消
+              </Button>
+              <Button type="submit" disabled={!name.trim()} loading={createM.isPending}>
+                创建
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

@@ -12,6 +12,8 @@ import { useNavigate, useParams } from "react-router-dom";
 import { api, errText } from "../lib/api";
 import { deleteConfirmText, sessionSummary, sessionTitle, sortSessions } from "../lib/sessions";
 import { plainText } from "../components/ui/rich-text";
+import { useConfirm } from "../components/ui/confirm";
+import { useToast } from "../components/ui/toast";
 import { Hint } from "../components/ui/tooltip";
 import { EmptyState } from "../components/ui/empty-state";
 import { SkeletonRows } from "../components/ui/skeleton";
@@ -22,6 +24,8 @@ import { ScopePicker } from "./ScopePicker";
 export function ChatSide() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const confirm = useConfirm();
+  const toast = useToast();
   const { sessionId } = useParams();
   const current = sessionId ? Number(sessionId) : null;
 
@@ -46,7 +50,7 @@ export function ChatSide() {
       void qc.invalidateQueries({ queryKey: Keys.sessions() });
       if (current === id) navigate("/chat");
     },
-    onError: (e) => window.alert(plainText(errText(e))),
+    onError: (e) => toast.error(plainText(errText(e))),
   });
 
   const handleNew = React.useCallback(() => createM.mutate(), [createM]);
@@ -92,7 +96,14 @@ export function ChatSide() {
                     type="button"
                     aria-label={`删除会话 ${sessionTitle(s)}`}
                     onClick={() => {
-                      if (window.confirm(plainText(deleteConfirmText(s)))) removeM.mutate(s.id);
+                      void confirm({
+                        title: "删除这个会话？",
+                        description: plainText(deleteConfirmText(s)),
+                        confirmLabel: "删除",
+                        danger: true,
+                      }).then((ok) => {
+                        if (ok) removeM.mutate(s.id);
+                      });
                     }}
                     className="flex size-6 items-center justify-center rounded-md text-text-secondary opacity-0 transition-opacity hover:bg-bg-input hover:text-state-error group-hover:opacity-100 focus-visible:opacity-100"
                   >

@@ -16,6 +16,23 @@ const API_TARGET = process.env.PKH_API ?? "http://127.0.0.1:8010";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  build: {
+    rollupOptions: {
+      output: {
+        // 这三组变化频率远低于业务代码：单独成块，发版时用户不必重下整个框架。
+        manualChunks: {
+          react: ["react", "react-dom", "react-router-dom"],
+          query: ["@tanstack/react-query"],
+          radix: [
+            "@radix-ui/react-dialog",
+            "@radix-ui/react-label",
+            "@radix-ui/react-slot",
+            "@radix-ui/react-tooltip",
+          ],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     strictPort: true,

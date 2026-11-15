@@ -13,7 +13,7 @@ import * as React from "react";
 /** 装饰性 emoji（不进 UI）：🔑⚠️🔴🟡✅❌🎯⇒ 等 —— 换成 lucide 图标或纯文字的地方由调用方决定。 */
 const EMOJI_RE = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{20E3}]/gu;
 
-/** 原生 `window.confirm/prompt` 里用的纯文本（去掉 markdown 标记与 emoji）。 */
+/** 纯文本（去掉 markdown 标记与 emoji）：确认框、toast、原生弹窗都用它。 */
 export function plainText(s: string): string {
   return s.replace(/\*\*/g, "").replace(EMOJI_RE, "").replace(/[ \t]+\n/g, "\n").trim();
 }

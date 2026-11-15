@@ -126,8 +126,11 @@ export function LoginPage() {
               <Label htmlFor="login-email">邮箱或昵称</Label>
               <Input
                 id="login-email"
+                name="username"
                 value={email}
                 autoComplete="username"
+                aria-invalid={err ? true : undefined}
+                aria-describedby={err ? "login-err" : undefined}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder={mode === "login" ? "you@example.com 或昵称" : "you@example.com"}
               />
@@ -136,9 +139,12 @@ export function LoginPage() {
               <Label htmlFor="login-pw">密码</Label>
               <Input
                 id="login-pw"
+                name="password"
                 type="password"
                 value={password}
                 autoComplete={mode === "login" ? "current-password" : "new-password"}
+                aria-invalid={err ? true : undefined}
+                aria-describedby={err ? "login-err" : undefined}
                 onChange={(e) => setPassword(e.target.value)}
               />
             </div>
@@ -149,7 +155,9 @@ export function LoginPage() {
                   <Label htmlFor="reg-name">显示名</Label>
                   <Input
                     id="reg-name"
+                    name="name"
                     value={displayName}
+                    autoComplete="name"
                     onChange={(e) => setDisplayName(e.target.value)}
                     placeholder="别人看到的名字"
                   />
@@ -166,7 +174,11 @@ export function LoginPage() {
               </>
             )}
 
-            {err && <Alert tone="danger">{err}</Alert>}
+            {err && (
+              <Alert id="login-err" tone="danger">
+                {err}
+              </Alert>
+            )}
 
             <Button type="submit" block disabled={!canSubmit} loading={busy}>
               {mode === "login" ? "登录" : "注册并登录"}

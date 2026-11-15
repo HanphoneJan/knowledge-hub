@@ -40,8 +40,12 @@ export function Composer({
 
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      // ⚠️ 输入法组合中的 Enter 不能当发送（中文输入法选词就是 Enter）
-      if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      // ⚠️ 输入法组合中的 Enter 不能当发送（中文输入法选词就是 Enter）。
+      // `isComposing` 单判在 Safari 上不可靠：compositionend 会先于 Enter 的
+      // keydown 送达脚本（WebKit 165004），那时 isComposing 已被重置为 false。
+      // IME 确认键的 keyCode 是 229，作为第二道闸。
+      const composing = e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229;
+      if (e.key === "Enter" && !e.shiftKey && !composing) {
         e.preventDefault();
         submit();
       }
