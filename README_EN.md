@@ -43,8 +43,10 @@ cd web && npm run build       # frontend build is served by the API at http://12
 Contract: [`docs/DESIGN-API.md`](docs/DESIGN-API.md) · frontend: [`web/README.md`](web/README.md) ·
 deploy: [`deploy/README.md`](deploy/README.md).
 
-Reader-facing guides (architecture, ingestion, retrieval, data model) were removed and are being
-rewritten. Until they land, the code, the tests and the contract are the source of truth.
+Reader-facing guides now live on the docs site:
+<https://docs.hanphone.cn/docs/项目/KnowledgeHub.html> (architecture, ingestion, retrieval & answering,
+data model, tenancy, interfaces, operations & acceptance). This repository keeps only a pointer page
+in [`docs/README.md`](docs/README.md); the code, the tests and the contract remain the source of truth.
 
 ## CI vs. full baseline
 

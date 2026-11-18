@@ -144,7 +144,7 @@ services/
   worker/       handlers/（摄取与清理任务）+ doc_state.py（终态判定）
   mcp/          MCP Server（4 个工具）
 web/            React + Vite 前端（架构与规矩见 web/README.md）
-docs/           API 契约（DESIGN-API.md）+ 读者文档 + 图源（diagrams/）+ 界面截图（img/）
+docs/           API 契约（DESIGN-API.md）+ 文档指针（README.md）+ 界面截图（img/）
 deploy/         dev.sh / ci.sh / monitor.py / backup.sh / restore.sh / seed_photos.py
                 measure_visual_leg.py / verify_*.py（手工验证脚本，不在基线里）
 eval/           三套验收脚本 + contract_check.py + _fixtures.py + _reset.py
@@ -159,23 +159,20 @@ tests/          pytest
 
 契约在 [`docs/DESIGN-API.md`](./docs/DESIGN-API.md)：82 个端点、错误码、分页，改端点先改它 —— `eval/contract_check.py` 会逐条校验。
 
-面向读者的文档在 `docs/` 下，按“先懂边界，再看链路”的顺序读：
+面向读者的文档以个人技术站为准（本仓库 `docs/README.md` 只留一页指针）：
 
-| 文档 | 回答什么 |
+| 站点页面 | 回答什么 |
 |---|---|
-| [`docs/README.md`](./docs/README.md) | 导读：定位、三条链路、目录、验收命令、已知限制 |
-| [`docs/architecture.md`](./docs/architecture.md) | 三个进程与端口、模块依赖、PG/Qdrant/blob 的数据平面 |
-| [`docs/ingestion.md`](./docs/ingestion.md) | 上传到 ready 的每一步、格式派发、六种切分、失败分类 |
-| [`docs/retrieval.md`](./docs/retrieval.md) | 四腿召回、RRF、查询路由、精排、降级与实测指标 |
-| [`docs/answering.md`](./docs/answering.md) | SSE 帧序、证据组装、抽取式/外部 LLM、引用与多轮 |
-| [`docs/data-model.md`](./docs/data-model.md) | 18 张表、内容寻址、软删与版本、删除链、对账与重建 |
-| [`docs/tenancy.md`](./docs/tenancy.md) | API Key 推导上下文、三档可见性、两个过滤入口 |
-| [`docs/operations.md`](./docs/operations.md) | 八种任务、文档终态、巡检、备份恢复、蓝绿重建 |
-| [`docs/interfaces.md`](./docs/interfaces.md) | HTTP/MCP/A2A 如何共用检索与问答内核 |
-| [`docs/testing.md`](./docs/testing.md) | 测试分层、CI 门禁、三套验收、结构守卫与盲区 |
-| [`docs/failure-modes.md`](./docs/failure-modes.md) | 检索降级、摄取失败、状态卡住、索引漂移、越权形状 |
+| [导读](https://docs.hanphone.cn/docs/项目/KnowledgeHub.html) | 定位、三条链路、目录、验收命令、已知限制 |
+| [架构总览](https://docs.hanphone.cn/docs/项目/KnowledgeHub/架构总览.html) | 三个进程与端口、模块依赖、PG/Qdrant/blob 的数据平面 |
+| [文档摄取](https://docs.hanphone.cn/docs/项目/KnowledgeHub/文档摄取.html) | 上传到 ready 的每一步、格式派发、六种切分、失败分类 |
+| [检索与问答](https://docs.hanphone.cn/docs/项目/KnowledgeHub/检索与问答.html) | 四腿召回、RRF、查询路由、精排；SSE 帧序、证据组装、引用与多轮 |
+| [数据与一致性](https://docs.hanphone.cn/docs/项目/KnowledgeHub/数据与一致性.html) | 18 张表、内容寻址、软删与版本、删除链、对账与重建 |
+| [多租户与权限](https://docs.hanphone.cn/docs/项目/KnowledgeHub/多租户与权限.html) | API Key 推导上下文、三档可见性、两个过滤入口 |
+| [对外接口](https://docs.hanphone.cn/docs/项目/KnowledgeHub/对外接口.html) | HTTP/MCP/A2A 如何共用检索与问答内核 |
+| [运维与验收](https://docs.hanphone.cn/docs/项目/KnowledgeHub/运维与验收.html) | 八种任务、文档终态、巡检、备份恢复、六层测试与 CI 门禁 |
 
-图源在 [`docs/diagrams/src/`](./docs/diagrams/src)，导出 PNG 2x 在 [`docs/diagrams/`](./docs/diagrams)。改图先改 `.drawio`，再重新导出；正文只引用导出产物。
+原文的《失败模式》与《测试与验收》没有独立页面，分别并进了《运维与验收》的排障顺序与「六层测试」两节。
 
 ## 五条硬约束（违反即错）
 

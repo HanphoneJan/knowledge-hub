@@ -305,7 +305,7 @@ def test_local_only_exemption_is_narrow():
     assert _is_local_only(".docs/PROGRESS.md")
     assert _is_local_only("web/dist")
     assert _is_local_only("web/dist/"), "带斜杠的写法也要认（目录写法）"
-    for must_check in ("docs/DESIGN-API.md", "docs/architecture.md", "README.md",
+    for must_check in ("docs/DESIGN-API.md", "docs/README.md", "README.md",
                        "services/api/main.py", "web/src/main.tsx", ".env.example"):
         assert not _is_local_only(must_check), (
             f"{must_check} 被豁免了 —— 例外清单只许装「故意不进仓库」的路径"

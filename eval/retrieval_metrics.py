@@ -120,7 +120,7 @@ def summarize(scores: Sequence[QueryScore], *, ks: Sequence[int] = (1, 5, 10)) -
 
     🔑 分类别汇总不是锦上添花：本项目已实测"一条固定权重不可能是所有类别的
     最优"，把 chat / photo / doc 混成一个 overall 数只会得到一个不可解释的值
-    （见 `docs/retrieval.md` §1 的纪律）。所以这里**永远**同时给 overall 与 by_category。
+    （见 https://docs.hanphone.cn/docs/项目/KnowledgeHub/检索与问答.html §1 的纪律）。所以这里**永远**同时给 overall 与 by_category。
     """
 
     def _block(rows: Sequence[QueryScore]) -> dict:
